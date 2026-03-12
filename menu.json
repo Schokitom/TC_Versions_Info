@@ -7,11 +7,11 @@
       "title": "Quadri shared Modelsubmenu1",
       "icon": "https://abcd.com/images/q1.svg",
       "command": "QUADRI_SUB_MENU1",
-    },
+    }
     {
       "title": "Quadri shared Model submenu2",
       "icon": "https://abcd.com/images/q2.svg",
       "command": "QUADRI_SUB_MENU2",
-    },
+    }
   ]
 }
