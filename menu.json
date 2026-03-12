@@ -1,4 +1,5 @@
-const mainMenuObject = {
+const mainMenuObject = 
+{
   title: "Test extension app",
   icon: "http://example.com/main_menu_icon.png",
   command: "main_nav_menu_cliked",
@@ -14,4 +15,4 @@ const mainMenuObject = {
       command: "submenu_2_clicked",
     },
   ],
-};
+}
