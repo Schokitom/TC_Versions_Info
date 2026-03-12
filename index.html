@@ -1,109 +1,40 @@
 <!DOCTYPE html>
-<html lang="de">
+<html>
+
 <head>
-    <meta charset="utf-8"/>
-    <meta name="viewport" content="width=device-width,initial-scale=1"/>
-    <title>PDF Versionsinfo</title>
-    <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/trimble-connect-workspace-api.js"></script>
-    <style>
-        body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 20px; background-color: #ffffff; color: #333; }
-        h2 { color: #0070ad; font-weight: 300; border-bottom: 1px solid #eee; padding-bottom: 10px; }
-        #status { padding: 10px; margin-bottom: 20px; border-radius: 4px; background: #e1f5fe; color: #0277bd; font-size: 14px; }
-        table { width: 100%; border-collapse: collapse; margin-top: 10px; table-layout: auto; }
-        th { background-color: #f8f9fa; color: #555; text-align: left; padding: 12px; border-bottom: 2px solid #0070ad; font-size: 13px; text-transform: uppercase; }
-        td { padding: 12px; border-bottom: 1px solid #eee; font-size: 14px; word-break: break-word; }
-        tr:hover { background-color: #f1f7fc; }
-        .version-pill { background: #0070ad; color: white; padding: 2px 8px; border-radius: 12px; font-weight: bold; font-size: 12px; }
-        .path-text { color: #888; font-size: 12px; font-style: italic; }
-    </style>
+
+<meta charset="utf-8">
+<title>Versionsinfo</title>
+
+<script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
+
+<link rel="stylesheet" href="style.css">
+
 </head>
+
 <body>
 
-    <h2>PDF Projekt-Übersicht</h2>
-    <div id="status">Verbindung wird hergestellt...</div>
+<h2>PDF Versionsübersicht</h2>
 
-    <table id="pdfTable" style="display:none;">
-        <thead>
-            <tr>
-                <th>Name</th>
-                <th>Geändert von</th>
-                <th>Letzte Änderung</th>
-                <th>Anzahl Versionen</th>
-                <th>Pfad im Projekt</th>
-            </tr>
-        </thead>
-        <tbody id="tableBody"></tbody>
-    </table>
+<input type="text" id="search" placeholder="Suche Datei...">
 
-    <script>
-        // Initialisierung der Trimble Connect API
-        TConnect.connect(window.parent).then(api => {
-            document.getElementById('status').innerText = "Suche PDF-Dateien im gesamten Projekt...";
-            startProjectScan(api);
-        }).catch(err => {
-            document.getElementById('status').innerHTML = "<b>Fehler:</b> Verbindung zur API fehlgeschlagen.";
-            console.error(err);
-        });
+<table id="fileTable">
 
-        async function startProjectScan(api) {
-            try {
-                const project = await api.project.getCurrentProject();
-                const allPdfFiles = [];
+<thead>
+<tr>
+<th>Name</th>
+<th>Geändert von</th>
+<th>Letzte Änderung</th>
+<th>Anzahl Versionen</th>
+<th>Pfad</th>
+</tr>
+</thead>
 
-                // Rekursive Funktion zum Durchsuchen aller Ebenen
-                async function scanFolder(folderId, currentPath) {
-                    const items = await api.project.getProjectItems(folderId);
-                    
-                    for (const item of items) {
-                        if (item.type === "FILE" && item.name.toLowerCase().endsWith(".pdf")) {
-                            allPdfFiles.push({
-                                name: item.name,
-                                user: item.modifiedBy || "Unbekannt",
-                                date: new Date(item.modifiedOn).toLocaleString('de-DE'),
-                                version: item.revision || 1,
-                                path: currentPath
-                            });
-                        } else if (item.type === "FOLDER") {
-                            // Wenn es ein Ordner ist, tiefer graben
-                            await scanFolder(item.id, currentPath + " / " + item.name);
-                        }
-                    }
-                }
+<tbody></tbody>
 
-                // Startet den Scan beim Root-Verzeichnis
-                await scanFolder(project.id, "Projekt");
-                renderTable(allPdfFiles);
+</table>
 
-            } catch (error) {
-                document.getElementById('status').innerText = "Scan-Fehler: " + error.message;
-            }
-        }
+<script src="app.js"></script>
 
-        function renderTable(files) {
-            const status = document.getElementById('status');
-            const table = document.getElementById('pdfTable');
-            const body = document.getElementById('tableBody');
-
-            if (files.length === 0) {
-                status.innerText = "Keine PDF-Dateien im Projekt gefunden.";
-                return;
-            }
-
-            status.style.display = "none";
-            table.style.display = "table";
-            body.innerHTML = "";
-
-            files.forEach(file => {
-                const row = `<tr>
-                    <td><strong>${file.name}</strong></td>
-                    <td>${file.user}</td>
-                    <td>${file.date}</td>
-                    <td><span class="version-pill">V${file.version}</span></td>
-                    <td class="path-text">${file.path}</td>
-                </tr>`;
-                body.innerHTML += row;
-            });
-        }
-    </script>
 </body>
 </html>
