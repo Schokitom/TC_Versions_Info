@@ -9,9 +9,10 @@
       "id": "versionViewerTab",
       "type": "com.trimble.connect.project.tab",
       "name": "Versions-Info",
-      "url": "https://raw.githubusercontent.com/Schokitom/TC_Versions_Info/refs/heads/main/index.html"
+      "url": "https://schokitom.github.io/TC_Versions_Info/index.html"
     }
   ]
 
 }
+
 
