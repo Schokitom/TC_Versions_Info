@@ -1,17 +1,17 @@
 {
   "title": "Quadri shared Model",
   "icon": "https://abcd.com/images/q.svg",
-  "command": "QUADRI_TOP_MENU", /*This will be passed to the extension when the menu is clicked*/
+  "command": "QUADRI_TOP_MENU",
   "subMenus": [
     {
       "title": "Quadri shared Modelsubmenu1",
       "icon": "https://abcd.com/images/q1.svg",
-      "command": "QUADRI_SUB_MENU1", /*This will be passed to the extension when the menu is clicked*/
+      "command": "QUADRI_SUB_MENU1",
     },
     {
       "title": "Quadri shared Model submenu2",
       "icon": "https://abcd.com/images/q2.svg",
-      "command": "QUADRI_SUB_MENU2", /*This will be passed to the extension when the menu is clicked*/
+      "command": "QUADRI_SUB_MENU2",
     },
   ]
 }
