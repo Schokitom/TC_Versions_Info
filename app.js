@@ -1,67 +1,69 @@
-let API = null;
-let files = [];
+let API = null
+let files = []
 
 async function init(){
 
-API = await TrimbleConnectWorkspace.connect(window.parent,onEvent);
+API = await TrimbleConnectWorkspace.connect(window.parent, onEvent)
 
-document.getElementById("status").innerText="API verbunden";
+document.getElementById("status").innerText="API verbunden"
 
-const menu = {
+// Extension registrieren
+
+await API.extension.register({
+
 title:"Versionsinfo",
 icon:"https://meinserver.de/trimble-versionsinfo/icon.png",
-command:"open_versionsinfo"
-};
 
-await API.extension.setMenu(menu);
+menu:{
+location:"main",
+command:"openVersions"
+}
 
-loadProjectFiles();
-
-initSearch();
+})
 
 }
 
 function onEvent(event,args){
 
-console.log(event,args);
+console.log(event,args)
 
 if(event==="extension.command"){
 
-if(args.data==="open_versionsinfo"){
+if(args.data==="openVersions"){
 
-document.body.scrollIntoView();
-
-}
+loadFiles()
 
 }
 
 }
 
-async function loadProjectFiles(){
+}
 
-const project = await API.project.getProject();
+async function loadFiles(){
 
-const folders = await API.project.getProjectFolders(project.id);
+const project = await API.project.getProject()
+
+const folders = await API.project.getProjectFolders(project.id)
 
 for(const folder of folders){
 
-await scanFolder(folder);
+await scanFolder(folder)
 
 }
 
-renderTable(files);
+render(files)
 
 }
 
 async function scanFolder(folder){
 
-const items = await API.project.getFolderItems(folder.id);
+const items = await API.project.getFolderItems(folder.id)
 
 for(const item of items){
 
 if(item.type==="folder"){
 
-await scanFolder(item);
+await scanFolder(item)
 
 }
 
@@ -69,19 +71,15 @@ if(item.type==="file"){
 
 if(item.name.toLowerCase().endsWith(".pdf")){
 
-let versionCount=1;
+let versionCount=1
 
 try{
 
-const versions=await API.project.getFileVersions(item.id);
+const versions=await API.project.getFileVersions(item.id)
 
-versionCount=versions.length;
+versionCount=versions.length
 
-}catch(e){
-
-console.log("Versionen konnten nicht geladen werden");
-
-}
+}catch(e){}
 
 files.push({
 
@@ -91,7 +89,7 @@ modifiedOn:item.modifiedOn||"",
 versions:versionCount,
 path:item.path||""
 
-});
+})
 
 }
 
@@ -101,59 +99,38 @@ path:item.path||""
 
 }
 
-function renderTable(list){
+function render(list){
 
-const tbody=document.querySelector("#fileTable tbody");
+const tbody=document.querySelector("#table tbody")
 
-tbody.innerHTML="";
+tbody.innerHTML=""
 
-list.forEach(file=>{
+list.forEach(f=>{
 
-const row=document.createElement("tr");
+const row=document.createElement("tr")
 
 row.innerHTML=`
 
-<td>${file.name}</td>
-<td>${file.modifiedBy}</td>
-<td>${formatDate(file.modifiedOn)}</td>
-<td>${file.versions}</td>
-<td>${file.path}</td>
+<td>${f.name}</td>
+<td>${f.modifiedBy}</td>
+<td>${formatDate(f.modifiedOn)}</td>
+<td>${f.versions}</td>
+<td>${f.path}</td>
 
-`;
+`
 
-tbody.appendChild(row);
+tbody.appendChild(row)
 
-});
-
-}
-
-function formatDate(date){
-
-if(!date)return "";
-
-return new Date(date).toLocaleString();
+})
 
 }
 
-function initSearch(){
+function formatDate(d){
 
-const search=document.getElementById("search");
+if(!d)return""
 
-search.addEventListener("input",()=>{
-
-const text=search.value.toLowerCase();
-
-const filtered=files.filter(f=>
-
-f.name.toLowerCase().includes(text)||
-f.path.toLowerCase().includes(text)
-
-);
-
-renderTable(filtered);
-
-});
+return new Date(d).toLocaleString()
 
 }
 
-init();
+init()
