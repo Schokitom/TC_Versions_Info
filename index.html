@@ -4,74 +4,84 @@
     <meta charset="UTF-8">
     <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/trimble-connect-workspace-api.js"></script>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 20px; color: #333; }
-        h2 { color: #0070ad; border-bottom: 2px solid #0070ad; padding-bottom: 10px; }
-        table { width: 100%; border-collapse: collapse; margin-top: 20px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
-        th { background-color: #0070ad; color: white; text-align: left; padding: 12px; }
-        td { padding: 10px; border-bottom: 1px solid #ddd; font-size: 13px; }
-        tr:hover { background-color: #f5f5f5; }
-        .loading { font-style: italic; color: #666; margin-top: 20px; }
-        .badge { background: #e1f5fe; color: #01579b; padding: 2px 8px; border-radius: 10px; font-weight: bold; }
+        body { font-family: 'Open Sans', Arial, sans-serif; margin: 20px; font-size: 14px; color: #333; }
+        h2 { color: #0070ad; }
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        th { background-color: #f4f4f4; text-align: left; padding: 10px; border-bottom: 2px solid #ddd; }
+        td { padding: 10px; border-bottom: 1px solid #eee; }
+        .badge { background: #0070ad; color: white; padding: 2px 7px; border-radius: 4px; font-weight: bold; font-size: 12px; }
+        .loading-msg { color: #666; font-style: italic; }
     </style>
 </head>
 <body>
-    <h2>PDF Datei-Übersicht</h2>
-    <div id="status" class="loading">Verbindung zu Trimble Connect wird hergestellt...</div>
+    <h2>Projektweite PDF-Versionsübersicht</h2>
+    <div id="status" class="loading-msg">Initialisiere Projekt-Scan...</div>
     
-    <table id="versionTable" style="display:none;">
+    <table id="resultTable" style="display:none;">
         <thead>
             <tr>
                 <th>Name</th>
                 <th>Geändert von</th>
                 <th>Letzte Änderung</th>
                 <th>Versionen</th>
-                <th>Pfad</th>
+                <th>Pfad im Projekt</th>
             </tr>
         </thead>
         <tbody id="tableBody"></tbody>
     </table>
 
     <script>
-        let api;
-
-        TConnect.connect(window.parent).then(workspaceApi => {
-            api = workspaceApi;
-            document.getElementById('status').innerText = "Suche nach .pdf Dateien im Projekt...";
-            loadPdfFiles();
+        TConnect.connect(window.parent).then(api => {
+            console.log("Verbunden mit Trimble Connect");
+            startScan(api);
+        }).catch(err => {
+            document.getElementById('status').innerText = "Verbindungsfehler: " + err;
         });
 
-        async function loadPdfFiles() {
+        async function startScan(api) {
             try {
                 const project = await api.project.getCurrentProject();
-                const rootItems = await api.project.getProjectItems(project.id);
-                let pdfFiles = [];
+                const statusDiv = document.getElementById('status');
+                statusDiv.innerText = `Suche PDF-Dateien in Projekt: ${project.name}...`;
 
-                // Rekursive Funktion zum Durchsuchen aller Ordner
-                async function scanItems(items, currentPath) {
+                const allItems = [];
+                
+                async function fetchRecursive(folderId, currentPath) {
+                    const items = await api.project.getProjectItems(folderId);
                     for (const item of items) {
-                        if (item.type === "FILE" && item.name.toLowerCase().endsWith(".pdf")) {
-                            pdfFiles.push({ ...item, fullPath: currentPath + "/" + item.name });
+                        if (item.type === "FILE") {
+                            // Filter auf .pdf geändert
+                            if (item.name.toLowerCase().endsWith(".pdf")) {
+                                allItems.push({
+                                    name: item.name,
+                                    author: item.modifiedBy || "N/A",
+                                    date: new Date(item.modifiedOn).toLocaleString('de-DE'),
+                                    rev: item.revision || 1,
+                                    path: currentPath
+                                });
+                            }
                         } else if (item.type === "FOLDER") {
-                            const subItems = await api.project.getProjectItems(item.id);
-                            await scanItems(subItems, currentPath + "/" + item.name);
+                            await fetchRecursive(item.id, currentPath + "/" + item.name);
                         }
                     }
                 }
 
-                await scanItems(rootItems, "Root");
-                renderTable(pdfFiles);
-            } catch (err) {
-                document.getElementById('status').innerText = "Fehler beim Laden: " + err.message;
+                await fetchRecursive(project.id, "Root");
+                renderTable(allItems);
+
+            } catch (error) {
+                document.getElementById('status').innerText = "Scan-Fehler: " + error.message;
+                console.error(error);
             }
         }
 
-        function renderTable(files) {
+        function renderTable(data) {
             const status = document.getElementById('status');
-            const table = document.getElementById('versionTable');
+            const table = document.getElementById('resultTable');
             const body = document.getElementById('tableBody');
 
-            if (files.length === 0) {
-                status.innerText = "Keine .pdf Dateien im Projekt gefunden.";
+            if (data.length === 0) {
+                status.innerText = "Keine PDF-Dateien im Projekt gefunden.";
                 return;
             }
 
@@ -79,13 +89,13 @@
             table.style.display = "table";
             body.innerHTML = "";
 
-            files.forEach(file => {
+            data.forEach(file => {
                 const row = `<tr>
                     <td><strong>${file.name}</strong></td>
-                    <td>${file.modifiedBy || 'Unbekannt'}</td>
-                    <td>${new Date(file.modifiedOn).toLocaleString('de-DE')}</td>
-                    <td><span class="badge">V${file.revision || '1'}</span></td>
-                    <td><small>${file.fullPath}</small></td>
+                    <td>${file.author}</td>
+                    <td>${file.date}</td>
+                    <td><span class="badge">V${file.rev}</span></td>
+                    <td><small>${file.path}</small></td>
                 </tr>`;
                 body.innerHTML += row;
             });
@@ -93,4 +103,3 @@
     </script>
 </body>
 </html>
-
