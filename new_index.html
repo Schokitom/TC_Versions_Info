@@ -1,78 +1,17 @@
-<!DOCTYPE html>
-<html lang="de">
-<head>
-    <meta charset="UTF-8">
-    <title>Version Viewer Extension</title>
-    <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/trimble-connect-workspace-api.js"></script>
-    <style>
-        body { font-family: 'Segoe UI', sans-serif; padding: 15px; background: #f9f9f9; }
-        table { width: 100%; border-collapse: collapse; margin-top: 10px; background: white; }
-        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-        th { background-color: #0070ad; color: white; }
-        tr:nth-child(even) { background-color: #f2f2f2; }
-        .empty-msg { color: #666; font-style: italic; }
-    </style>
-</head>
-<body>
-    <h3>Ausgewählte Datei-Versionen</h3>
-    <div id="content">
-        <p class="empty-msg">Bitte wähle eine oder mehrere Dateien im Explorer aus.</p>
-    </div>
-
-    <script>
-        let api;
-
-        // Initialisierung der Verbindung zum Trimble Connect Host
-        TConnect.connect(window.parent, async (event, args) => {
-            switch(event) {
-                case "extension.onUpdate":
-                    // Wird aufgerufen, wenn sich im Projekt etwas ändert
-                    updateSelection();
-                    break;
-            }
-        }).then(async (workspaceApi) => {
-            api = workspaceApi;
-            console.log("Trimble Connect API bereit.");
-            
-            // Sofortige Prüfung beim Laden
-            updateSelection();
-        });
-
-        async function updateSelection() {
-            if (!api) return;
-
-            try {
-                // Die aktuell im Explorer markierten Objekte abrufen
-                const selection = await api.explorer.getSelection();
-                const contentDiv = document.getElementById('content');
-
-                if (!selection || selection.length === 0) {
-                    contentDiv.innerHTML = '<p class="empty-msg">Keine Auswahl vorhanden.</p>';
-                    return;
-                }
-
-                let html = '<table><thead><tr><th>Name</th><th>Version / Revision</th></tr></thead><tbody>';
-                let filesFound = false;
-
-                selection.forEach(item => {
-                    if (item.type === "FILE") {
-                        filesFound = true;
-                        // item.revision kommt direkt aus dem ConnectFile-Objekt der API
-                        html += `<tr><td>${item.name}</td><td><strong>V${item.revision || 1}</strong></td></tr>`;
-                    }
-                });
-
-                html += '</tbody></table>';
-
-                if (!filesFound) {
-                    contentDiv.innerHTML = '<p class="empty-msg">Keine Dateien ausgewählt (nur Ordner).</p>';
-                } else {
-                    contentDiv.innerHTML = html;
-                }
-            } catch (err) {
-                console.error("Fehler beim Abrufen der Auswahl:", err);
-            }
-        }
-    </script>
-</body>
-</html>
+const mainMenuObject = {
+  title: "Test extension app",
+  icon: "http://example.com/main_menu_icon.png",
+  command: "main_nav_menu_cliked",
+  subMenus: [
+    {
+      title: "Sub menu 1",
+      icon: "http://example.com/sub_menu_icon.png",
+      command: "submenu_1_clicked",
+    },
+    {
+      title: "Sub menu 2",
+      icon: "http://example.com/sub_menu_icon.png",
+      command: "submenu_2_clicked",
+    },
+  ],
+};
