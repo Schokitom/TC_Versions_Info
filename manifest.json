@@ -1,20 +1,9 @@
 {
-    "icon": "http://example.com/app_icon.png",
-    "title": "Version Info",
-    "url": "https://schokitom.github.io/TC_Versions_Info/index.html",
-    "description": "Test extension",
-    "configCommand": "do_config",
-    "enabled": false
-    "name": "Test Version",
-  "identifier": "com.schokitom.test",
+  "title": "Dateiversionen Anzeige",
+  "identifier": "com.schokitom.versionviewer",
   "version": "1.0.0",
-  "extensionPoints": [
-    {
-      "id": "vTab",
-      "type": "com.trimble.connect.project.tab",
-      "name": "Info",
-      "url": "https://schokitom.github.io/TC_Versions_Info/index.html"
-    }
-  ]
+  "description": "Zeigt Revisionsnummern der gewählten Dateien",
+  "icon": "https://img.icons8.com/color/48/000000/info.png",
+  "url": "https://schokitom.github.io/TC_Versions_Info/index.html",
+  "enabled": true
 }
-
