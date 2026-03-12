@@ -1,8 +1,17 @@
 {
-    "icon": "http://example.com/app_icon.png",
-    "title": "React example",
-    "url": "http://example.com/index.html",
-    "description": "Test extension",
-    "configCommand": "do_config",
-    "enabled": false
+  "title": "Quadri shared Model",
+  "icon": "https://abcd.com/images/q.svg",
+  "command": "QUADRI_TOP_MENU", /*This will be passed to the extension when the menu is clicked*/
+  "subMenus": [
+    {
+      "title": "Quadri shared Modelsubmenu1",
+      "icon": "https://abcd.com/images/q1.svg",
+      "command": "QUADRI_SUB_MENU1", /*This will be passed to the extension when the menu is clicked*/
+    },
+    {
+      "title": "Quadri shared Model submenu2",
+      "icon": "https://abcd.com/images/q2.svg",
+      "command": "QUADRI_SUB_MENU2", /*This will be passed to the extension when the menu is clicked*/
+    },
+  ]
 }
