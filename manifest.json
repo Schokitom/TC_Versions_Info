@@ -1,13 +1,15 @@
 {
-  "title": "Dateiversionen Anzeige",
+  "name": "Versionsinfo",
   "identifier": "com.schokitom.versionviewer",
-  "version": "1.0.0",
-  "description": "Zeigt Revisionsnummern der gewählten Dateien",
-  "icon": "https://img.icons8.com/color/48/000000/info.png",
-  "id": "vTab",
+  "version": "1.1.0",
+  "description": "Anzeige aller .pdf Dateien und deren Versionen",
+  "icon": "https://img.icons8.com/color/48/000000/layers.png",
+  "extensionPoints": [
+    {
+      "id": "pdfVersionTab",
       "type": "com.trimble.connect.project.tab",
-      "name": "Info",
-  "url": "https://schokitom.github.io/TC_Versions_Info/index.html",
-  "enabled": true
+      "name": "Versionsinfo",
+      "url": "https://schokitom.github.io/TC_Versions_Info/index.html"
+    }
+  ]
 }
-
