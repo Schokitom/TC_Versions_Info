@@ -15,7 +15,7 @@
     </style>
 </head>
 <body>
-    <h2>UDF Datei-Übersicht</h2>
+    <h2>PDF Datei-Übersicht</h2>
     <div id="status" class="loading">Verbindung zu Trimble Connect wird hergestellt...</div>
     
     <table id="versionTable" style="display:none;">
@@ -37,20 +37,20 @@
         TConnect.connect(window.parent).then(workspaceApi => {
             api = workspaceApi;
             document.getElementById('status').innerText = "Suche nach .pdf Dateien im Projekt...";
-            loadUdfFiles();
+            loadPdfFiles();
         });
 
-        async function loadUdfFiles() {
+        async function loadPdfFiles() {
             try {
                 const project = await api.project.getCurrentProject();
                 const rootItems = await api.project.getProjectItems(project.id);
-                let udfFiles = [];
+                let pdfFiles = [];
 
                 // Rekursive Funktion zum Durchsuchen aller Ordner
                 async function scanItems(items, currentPath) {
                     for (const item of items) {
                         if (item.type === "FILE" && item.name.toLowerCase().endsWith(".pdf")) {
-                            udfFiles.push({ ...item, fullPath: currentPath + "/" + item.name });
+                            pdfFiles.push({ ...item, fullPath: currentPath + "/" + item.name });
                         } else if (item.type === "FOLDER") {
                             const subItems = await api.project.getProjectItems(item.id);
                             await scanItems(subItems, currentPath + "/" + item.name);
@@ -59,7 +59,7 @@
                 }
 
                 await scanItems(rootItems, "Root");
-                renderTable(udfFiles);
+                renderTable(pdfFiles);
             } catch (err) {
                 document.getElementById('status').innerText = "Fehler beim Laden: " + err.message;
             }
@@ -93,3 +93,4 @@
     </script>
 </body>
 </html>
+
