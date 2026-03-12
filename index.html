@@ -4,6 +4,7 @@
 <head>
 
 <meta charset="utf-8">
+
 <title>Versionsinfo</title>
 
 <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
@@ -16,7 +17,9 @@
 
 <h2>PDF Versionsübersicht</h2>
 
-<input type="text" id="search" placeholder="Suche Datei...">
+<div id="status">Verbinde Trimble API...</div>
+
+<input type="text" id="search" placeholder="Suche Datei">
 
 <table id="fileTable">
 
@@ -25,7 +28,7 @@
 <th>Name</th>
 <th>Geändert von</th>
 <th>Letzte Änderung</th>
-<th>Anzahl Versionen</th>
+<th>Versionen</th>
 <th>Pfad</th>
 </tr>
 </thead>
@@ -37,4 +40,5 @@
 <script src="app.js"></script>
 
 </body>
+
 </html>
