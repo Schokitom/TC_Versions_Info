@@ -1,0 +1,15 @@
+{
+  "name": "File Version Viewer",
+  "identifier": "com.deinefirma.versionviewer",
+  "version": "1.0.0",
+  "description": "Zeigt die Revisionsnummer der ausgewählten Dateien an.",
+  "icon": "https://img.icons8.com/color/48/000000/info.png",
+  "extensionPoints": [
+    {
+      "id": "versionViewerTab",
+      "type": "com.trimble.connect.project.tab",
+      "name": "Versions-Info",
+      "url": "https://dein-server.de/index.html"
+    }
+  ]
+}
