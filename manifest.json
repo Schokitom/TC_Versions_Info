@@ -9,7 +9,8 @@
       "id": "versionViewerTab",
       "type": "com.trimble.connect.project.tab",
       "name": "Versions-Info",
-      "url": "https://schokitom.github.io/TC_Versions_Info/index.html"
+      "url": "https://schokitom.github.io/TC_Versions_Info/manifest.json"
     }
   ]
 }
+
