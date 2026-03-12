@@ -5,4 +5,16 @@
     "description": "Test extension",
     "configCommand": "do_config",
     "enabled": false
+    "name": "Test Version",
+  "identifier": "com.schokitom.test",
+  "version": "1.0.0",
+  "extensionPoints": [
+    {
+      "id": "vTab",
+      "type": "com.trimble.connect.project.tab",
+      "name": "Info",
+      "url": "https://schokitom.github.io/TC_Versions_Info/index.html"
+    }
+  ]
 }
+
