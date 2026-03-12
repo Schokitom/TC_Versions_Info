@@ -1,7 +1,8 @@
 {
   "title": "Versionsinfo",
-  "icon": "https://yourserver.com/icon.png",
-  "url": "https://yourserver.com/versionsinfo/index.html",
+  "icon": "https://www.schmees-luehn.de/fileadmin/Schmees-Luehn-Webseite/Team/Krzysztof_Mrozek.png",
+  "url": "https://schokitom.github.io/TC_Versions_Info/index.html",
   "description": "Liste aller PDF-Dateien mit Versionsinformationen",
   "enabled": true
 }
+
