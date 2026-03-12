@@ -4,6 +4,10 @@
   "version": "1.0.0",
   "description": "Zeigt Revisionsnummern der gewählten Dateien",
   "icon": "https://img.icons8.com/color/48/000000/info.png",
+  "id": "vTab",
+      "type": "com.trimble.connect.project.tab",
+      "name": "Info",
   "url": "https://schokitom.github.io/TC_Versions_Info/index.html",
   "enabled": true
 }
+
