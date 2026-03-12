@@ -1,22 +1,711 @@
 <!DOCTYPE html>
-<html>
+<html lang="de">
 <head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Versionsinfo</title>
+  <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-<meta charset="utf-8">
+    :root {
+      --bg:        #0f1117;
+      --surface:   #1a1d27;
+      --border:    #2a2d3e;
+      --accent:    #00c2ff;
+      --accent2:   #005f8a;
+      --text:      #e4e8f0;
+      --muted:     #7a8199;
+      --success:   #22d3a0;
+      --warning:   #f59e0b;
+      --danger:    #ef4444;
+      --row-hover: #1e2235;
+      --font:      'DM Mono', 'Fira Code', 'Courier New', monospace;
+      --font-ui:   'DM Sans', 'Segoe UI', sans-serif;
+    }
 
-<title>Versionsinfo</title>
+    @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600&display=swap');
 
-<script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-ui);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
 
+    /* ── Header ── */
+    header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 20px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+      flex-shrink: 0;
+    }
+    .header-icon {
+      width: 32px; height: 32px;
+      background: linear-gradient(135deg, var(--accent2), var(--accent));
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .header-icon svg { width: 18px; height: 18px; fill: #fff; }
+    h1 {
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      color: var(--text);
+    }
+    .project-badge {
+      margin-left: auto;
+      font-family: var(--font);
+      font-size: 11px;
+      color: var(--muted);
+      background: var(--bg);
+      border: 1px solid var(--border);
+      padding: 3px 10px;
+      border-radius: 20px;
+      max-width: 220px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* ── Toolbar ── */
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 20px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .search-wrap {
+      flex: 1;
+      position: relative;
+    }
+    .search-wrap svg {
+      position: absolute;
+      left: 10px; top: 50%;
+      transform: translateY(-50%);
+      width: 15px; height: 15px;
+      fill: var(--muted);
+    }
+    #searchInput {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 7px 10px 7px 32px;
+      font-size: 13px;
+      color: var(--text);
+      font-family: var(--font-ui);
+      outline: none;
+      transition: border-color .2s;
+    }
+    #searchInput:focus { border-color: var(--accent); }
+    #searchInput::placeholder { color: var(--muted); }
+
+    .btn {
+      display: flex; align-items: center; gap: 6px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 14px;
+      font-size: 12px;
+      font-family: var(--font-ui);
+      color: var(--text);
+      cursor: pointer;
+      transition: all .15s;
+      white-space: nowrap;
+    }
+    .btn:hover { border-color: var(--accent); color: var(--accent); }
+    .btn svg { width: 14px; height: 14px; fill: currentColor; }
+    .btn.primary {
+      background: var(--accent2);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    .btn.primary:hover { background: var(--accent); }
+
+    .stat-pill {
+      font-family: var(--font);
+      font-size: 11px;
+      color: var(--muted);
+      padding: 5px 12px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+    }
+    .stat-pill span { color: var(--accent); font-weight: 500; }
+
+    /* ── Table container ── */
+    .table-wrap {
+      flex: 1;
+      overflow-y: auto;
+      overflow-x: auto;
+      padding: 0 20px 20px;
+    }
+    .table-wrap::-webkit-scrollbar { width: 6px; height: 6px; }
+    .table-wrap::-webkit-scrollbar-track { background: transparent; }
+    .table-wrap::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      margin-top: 12px;
+      min-width: 760px;
+    }
+    thead th {
+      position: sticky; top: 0; z-index: 1;
+      background: var(--surface);
+      border-bottom: 2px solid var(--accent2);
+      padding: 10px 12px;
+      text-align: left;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      cursor: pointer;
+      user-select: none;
+      white-space: nowrap;
+      transition: color .15s;
+    }
+    thead th:hover { color: var(--accent); }
+    thead th .sort-icon { margin-left: 4px; opacity: .4; }
+    thead th.sorted { color: var(--accent); }
+    thead th.sorted .sort-icon { opacity: 1; }
+
+    tbody tr {
+      border-bottom: 1px solid var(--border);
+      transition: background .1s;
+    }
+    tbody tr:hover { background: var(--row-hover); }
+    td {
+      padding: 10px 12px;
+      vertical-align: middle;
+      color: var(--text);
+    }
+    td.name-cell {
+      font-family: var(--font);
+      font-size: 12.5px;
+      font-weight: 500;
+      color: var(--accent);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .pdf-icon {
+      flex-shrink: 0;
+      width: 22px; height: 22px;
+      background: linear-gradient(135deg, #ef4444, #b91c1c);
+      border-radius: 4px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 7px;
+      font-weight: 700;
+      color: #fff;
+      letter-spacing: .03em;
+    }
+    td.path-cell {
+      font-family: var(--font);
+      font-size: 11px;
+      color: var(--muted);
+      max-width: 240px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    td.versions-cell {
+      text-align: center;
+    }
+    .version-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 2px 10px;
+      font-family: var(--font);
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--success);
+      min-width: 32px;
+    }
+    td.date-cell {
+      font-family: var(--font);
+      font-size: 11px;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    td.user-cell {
+      font-size: 12px;
+    }
+    .user-chip {
+      display: inline-flex; align-items: center; gap: 6px;
+    }
+    .avatar {
+      width: 22px; height: 22px;
+      background: linear-gradient(135deg, var(--accent2), var(--accent));
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 9px;
+      font-weight: 600;
+      color: #fff;
+      flex-shrink: 0;
+    }
+
+    /* ── Loading / Error / Empty ── */
+    .state-overlay {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      padding: 40px;
+    }
+    .spinner {
+      width: 40px; height: 40px;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .state-title { font-size: 15px; font-weight: 500; color: var(--text); }
+    .state-sub { font-size: 13px; color: var(--muted); text-align: center; max-width: 340px; }
+
+    .error-icon { font-size: 36px; }
+
+    /* ── Progress bar ── */
+    .progress-bar-wrap {
+      height: 2px;
+      background: var(--border);
+      flex-shrink: 0;
+      overflow: hidden;
+    }
+    .progress-bar {
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent2), var(--accent));
+      width: 0%;
+      transition: width .3s ease;
+    }
+
+    /* ── Footer ── */
+    footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 20px;
+      border-top: 1px solid var(--border);
+      font-size: 11px;
+      color: var(--muted);
+      flex-shrink: 0;
+    }
+    footer .status { display: flex; align-items: center; gap: 6px; }
+    .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); }
+    .dot.loading { background: var(--warning); animation: pulse .8s ease-in-out infinite; }
+    .dot.error { background: var(--danger); }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+  </style>
 </head>
-
 <body>
 
-<h2>Versionsinfo geladen</h2>
+<!-- Header -->
+<header>
+  <div class="header-icon">
+    <svg viewBox="0 0 24 24"><path d="M6 2a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6H6zm7 1.5L18.5 9H13V3.5zM8 13h8v1H8v-1zm0 3h8v1H8v-1zm0-6h4v1H8v-1z"/></svg>
+  </div>
+  <h1>Versionsinfo</h1>
+  <div class="project-badge" id="projectBadge">Verbinde...</div>
+</header>
 
-<div id="status">Verbinde API...</div>
+<!-- Progress bar -->
+<div class="progress-bar-wrap">
+  <div class="progress-bar" id="progressBar"></div>
+</div>
 
-<script src="app.js"></script>
+<!-- Toolbar (hidden until loaded) -->
+<div class="toolbar" id="toolbar" style="display:none">
+  <div class="search-wrap">
+    <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+    <input type="text" id="searchInput" placeholder="Dateiname oder Pfad suchen…" oninput="filterTable()" />
+  </div>
+  <div class="stat-pill">Gesamt: <span id="totalCount">0</span></div>
+  <button class="btn primary" onclick="loadFiles()">
+    <svg viewBox="0 0 24 24"><path d="M17.65 6.35A7.958 7.958 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+    Aktualisieren
+  </button>
+</div>
 
+<!-- Loading state -->
+<div class="state-overlay" id="stateLoading">
+  <div class="spinner"></div>
+  <div class="state-title">Lade PDF-Dateien…</div>
+  <div class="state-sub" id="loadingMessage">Verbinde mit Trimble Connect API</div>
+</div>
+
+<!-- Error state -->
+<div class="state-overlay" id="stateError" style="display:none">
+  <div class="error-icon">⚠️</div>
+  <div class="state-title">Verbindung fehlgeschlagen</div>
+  <div class="state-sub" id="errorMessage">Fehler beim Laden der Daten.</div>
+  <button class="btn primary" onclick="loadFiles()">
+    <svg viewBox="0 0 24 24"><path d="M17.65 6.35A7.958 7.958 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+    Erneut versuchen
+  </button>
+</div>
+
+<!-- Empty state -->
+<div class="state-overlay" id="stateEmpty" style="display:none">
+  <div class="error-icon">📂</div>
+  <div class="state-title">Keine PDF-Dateien gefunden</div>
+  <div class="state-sub">Im Explorer dieses Projekts sind keine PDF-Dokumente vorhanden.</div>
+</div>
+
+<!-- Table -->
+<div class="table-wrap" id="tableWrap" style="display:none">
+  <table id="fileTable">
+    <thead>
+      <tr>
+        <th onclick="sortTable('name')" id="th-name">
+          Name <span class="sort-icon">↕</span>
+        </th>
+        <th onclick="sortTable('modifiedBy')" id="th-modifiedBy">
+          Geändert von <span class="sort-icon">↕</span>
+        </th>
+        <th onclick="sortTable('modifiedAt')" id="th-modifiedAt">
+          Letzte Änderung <span class="sort-icon">↕</span>
+        </th>
+        <th onclick="sortTable('versions')" id="th-versions" style="text-align:center">
+          Versionen <span class="sort-icon">↕</span>
+        </th>
+        <th onclick="sortTable('path')" id="th-path">
+          Pfad <span class="sort-icon">↕</span>
+        </th>
+      </tr>
+    </thead>
+    <tbody id="tableBody"></tbody>
+  </table>
+</div>
+
+<!-- Footer -->
+<footer>
+  <div class="status">
+    <div class="dot" id="statusDot"></div>
+    <span id="statusText">Initialisierung…</span>
+  </div>
+  <span>Trimble Connect · Versionsinfo Extension</span>
+</footer>
+
+<script>
+// ─────────────────────────────────────────
+//  State
+// ─────────────────────────────────────────
+let API = null;
+let accessToken = null;
+let projectId = null;
+let allFiles = [];
+let sortKey = 'name';
+let sortAsc = true;
+
+// ─────────────────────────────────────────
+//  Trimble Connect REST helpers
+// ─────────────────────────────────────────
+
+// Trimble Connect File API base URLs per region
+const TC_API = 'https://app.connect.trimble.com/tc/api/2.0';
+
+async function tcGet(path) {
+  const res = await fetch(`${TC_API}${path}`, {
+    headers: { Authorization: `Bearer ${accessToken}` }
+  });
+  if (!res.ok) throw new Error(`API ${res.status}: ${path}`);
+  return res.json();
+}
+
+/** Recursively collect all files in a folder */
+async function collectFiles(folderId, folderPath, depth = 0) {
+  if (depth > 20) return []; // safety
+  let items = [];
+
+  // List folder contents
+  const data = await tcGet(`/files?folderId=${folderId}&includeDeleted=false&limit=500`);
+  const entries = data.list || data.items || data || [];
+
+  for (const entry of entries) {
+    if (entry.type === 'FOLDER' || entry.isFolder) {
+      const sub = await collectFiles(entry.id, `${folderPath}/${entry.name}`, depth + 1);
+      items = items.concat(sub);
+    } else {
+      entry._path = folderPath;
+      items.push(entry);
+    }
+  }
+  return items;
+}
+
+/** Get file versions */
+async function getVersionCount(fileId) {
+  try {
+    const data = await tcGet(`/files/${fileId}/versions`);
+    const versions = data.list || data.versions || data || [];
+    return Array.isArray(versions) ? versions.length : 1;
+  } catch {
+    return 1;
+  }
+}
+
+// ─────────────────────────────────────────
+//  Main load function
+// ─────────────────────────────────────────
+async function loadFiles() {
+  showState('loading');
+  setProgress(5);
+  setStatus('loading', 'Lade Projektstruktur…');
+
+  try {
+    // Get project root folder
+    setLoadingMsg('Rufe Projektinformationen ab…');
+    const project = await tcGet(`/projects/${projectId}`);
+    setProgress(15);
+
+    // Get root folder id
+    const rootFolderId = project.rootFolder?.id || project.rootFolderId;
+    if (!rootFolderId) throw new Error('Root-Ordner nicht gefunden');
+
+    setLoadingMsg('Durchsuche Ordnerstruktur…');
+    const allEntries = await collectFiles(rootFolderId, '');
+    setProgress(55);
+
+    // Filter PDFs
+    const pdfFiles = allEntries.filter(f => {
+      const name = (f.name || '').toLowerCase();
+      return name.endsWith('.pdf');
+    });
+
+    if (pdfFiles.length === 0) {
+      setProgress(100);
+      showState('empty');
+      setStatus('ok', `Keine PDF-Dateien gefunden`);
+      return;
+    }
+
+    setLoadingMsg(`Lade Versionsdaten für ${pdfFiles.length} PDF-Dateien…`);
+
+    // Load version counts
+    const step = 40 / pdfFiles.length;
+    let progress = 55;
+    for (const f of pdfFiles) {
+      f._versionCount = await getVersionCount(f.id);
+      progress += step;
+      setProgress(Math.min(progress, 95));
+    }
+
+    allFiles = pdfFiles;
+    setProgress(100);
+    renderTable();
+    showState('table');
+    document.getElementById('toolbar').style.display = 'flex';
+    document.getElementById('totalCount').textContent = allFiles.length;
+    setStatus('ok', `${allFiles.length} PDF-Dateien geladen`);
+
+  } catch (err) {
+    console.error(err);
+    document.getElementById('errorMessage').textContent = err.message || String(err);
+    showState('error');
+    setStatus('error', 'Fehler beim Laden');
+  }
+}
+
+// ─────────────────────────────────────────
+//  Table rendering
+// ─────────────────────────────────────────
+function getFileValue(f, key) {
+  switch (key) {
+    case 'name': return (f.name || '').toLowerCase();
+    case 'modifiedBy': return (f.modifiedBy?.name || f.modifiedBy || f.lastModifiedBy || '').toLowerCase();
+    case 'modifiedAt': return f.modifiedAt || f.updatedAt || f.lastModifiedAt || '';
+    case 'versions': return f._versionCount || 1;
+    case 'path': return (f._path || '').toLowerCase();
+    default: return '';
+  }
+}
+
+function renderTable() {
+  const query = (document.getElementById('searchInput')?.value || '').toLowerCase();
+  let data = allFiles.filter(f => {
+    if (!query) return true;
+    const name = (f.name || '').toLowerCase();
+    const path = (f._path || '').toLowerCase();
+    return name.includes(query) || path.includes(query);
+  });
+
+  // Sort
+  data.sort((a, b) => {
+    let va = getFileValue(a, sortKey);
+    let vb = getFileValue(b, sortKey);
+    if (sortKey === 'versions') { va = Number(va); vb = Number(vb); }
+    if (va < vb) return sortAsc ? -1 : 1;
+    if (va > vb) return sortAsc ? 1 : -1;
+    return 0;
+  });
+
+  const tbody = document.getElementById('tableBody');
+  tbody.innerHTML = '';
+
+  for (const f of data) {
+    const name = f.name || '–';
+    const modBy = f.modifiedBy?.name || f.modifiedBy || f.lastModifiedBy || f.createdBy?.name || 'Unbekannt';
+    const modAt = formatDate(f.modifiedAt || f.updatedAt || f.lastModifiedAt || f.createdAt);
+    const versions = f._versionCount || 1;
+    const path = f._path || '/';
+    const initials = modBy.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>
+        <div class="name-cell">
+          <div class="pdf-icon">PDF</div>
+          <span title="${escHtml(name)}">${escHtml(name)}</span>
+        </div>
+      </td>
+      <td class="user-cell">
+        <div class="user-chip">
+          <div class="avatar">${escHtml(initials)}</div>
+          <span>${escHtml(modBy)}</span>
+        </div>
+      </td>
+      <td class="date-cell">${modAt}</td>
+      <td class="versions-cell"><span class="version-badge">${versions}</span></td>
+      <td class="path-cell" title="${escHtml(path)}">${escHtml(path || '/')}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+
+  // Update sort indicators
+  ['name','modifiedBy','modifiedAt','versions','path'].forEach(k => {
+    const th = document.getElementById(`th-${k}`);
+    if (!th) return;
+    if (k === sortKey) {
+      th.classList.add('sorted');
+      th.querySelector('.sort-icon').textContent = sortAsc ? ' ↑' : ' ↓';
+    } else {
+      th.classList.remove('sorted');
+      th.querySelector('.sort-icon').textContent = ' ↕';
+    }
+  });
+}
+
+function sortTable(key) {
+  if (sortKey === key) sortAsc = !sortAsc;
+  else { sortKey = key; sortAsc = true; }
+  renderTable();
+}
+
+function filterTable() { renderTable(); }
+
+// ─────────────────────────────────────────
+//  UI helpers
+// ─────────────────────────────────────────
+function showState(s) {
+  document.getElementById('stateLoading').style.display = s === 'loading' ? 'flex' : 'none';
+  document.getElementById('stateError').style.display   = s === 'error'   ? 'flex' : 'none';
+  document.getElementById('stateEmpty').style.display   = s === 'empty'   ? 'flex' : 'none';
+  document.getElementById('tableWrap').style.display    = s === 'table'   ? 'block': 'none';
+}
+
+function setProgress(pct) {
+  document.getElementById('progressBar').style.width = pct + '%';
+  if (pct >= 100) setTimeout(() => document.getElementById('progressBar').style.width = '0%', 600);
+}
+
+function setLoadingMsg(msg) {
+  const el = document.getElementById('loadingMessage');
+  if (el) el.textContent = msg;
+}
+
+function setStatus(type, msg) {
+  const dot = document.getElementById('statusDot');
+  dot.className = 'dot' + (type === 'loading' ? ' loading' : type === 'error' ? ' error' : '');
+  document.getElementById('statusText').textContent = msg;
+}
+
+function formatDate(iso) {
+  if (!iso) return '–';
+  try {
+    const d = new Date(iso);
+    return d.toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit', year:'numeric' })
+      + ' ' + d.toLocaleTimeString('de-DE', { hour:'2-digit', minute:'2-digit' });
+  } catch { return iso; }
+}
+
+function escHtml(str) {
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ─────────────────────────────────────────
+//  Trimble Workspace API init
+// ─────────────────────────────────────────
+(async () => {
+  try {
+    API = await TrimbleConnectWorkspace.connect(
+      window.parent,
+      async (event, args) => {
+        if (event === 'extension.accessToken') {
+          accessToken = args.data;
+        }
+        if (event === 'extension.command') {
+          // handle menu commands if needed
+        }
+      },
+      30000
+    );
+
+    // Set navigation menu
+    await API.ui.setMenu({
+      title: 'Versionsinfo',
+      icon: 'https://cdn-icons-png.flaticon.com/512/337/337946.png',
+      command: 'versionsinfo_main'
+    });
+
+    // Get project
+    const projectInfo = await API.project.getCurrentProject();
+    projectId = projectInfo?.id;
+    const projectName = projectInfo?.name || 'Unbekanntes Projekt';
+    document.getElementById('projectBadge').textContent = projectName;
+
+    // Request access token
+    setLoadingMsg('Anfrage für Zugriffstoken…');
+    const tokenResult = await API.extension.requestPermission('accesstoken');
+    if (tokenResult && tokenResult !== 'pending' && tokenResult !== 'denied') {
+      accessToken = tokenResult;
+    }
+
+    // Wait briefly for token event if still pending
+    if (!accessToken) {
+      await new Promise(r => setTimeout(r, 2000));
+    }
+
+    if (!accessToken) {
+      throw new Error('Kein Zugriffstoken erhalten. Bitte Berechtigungen in den Extension-Einstellungen erlauben.');
+    }
+
+    await loadFiles();
+
+  } catch (err) {
+    console.error('Init error:', err);
+    document.getElementById('errorMessage').textContent = err.message || String(err);
+    showState('error');
+    setStatus('error', 'Initialisierungsfehler');
+  }
+})();
+</script>
 </body>
 </html>
