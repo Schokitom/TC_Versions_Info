@@ -1,16 +1,13 @@
 {
-  "name": "File Version Viewer",
-  "identifier": "com.schokitom.versionviewer",
+  "name": "Test Version",
+  "identifier": "com.schokitom.test",
   "version": "1.0.0",
-  "description": "Zeigt die Revisionsnummer der ausgewählten Dateien an.",
-  "icon": "https://img.icons8.com/color/48/000000/info.png",
   "extensionPoints": [
     {
-      "id": "versionViewerTab",
+      "id": "vTab",
       "type": "com.trimble.connect.project.tab",
-      "name": "Versions-Info",
-      "url": "https://schokitom.github.io/TC_Versions_Info/manifest.json"
+      "name": "Info",
+      "url": "https://schokitom.github.io/TC_Versions_Info/index.html"
     }
   ]
 }
-
