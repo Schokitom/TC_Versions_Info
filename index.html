@@ -1,76 +1,50 @@
 <!DOCTYPE html>
-<html lang="de">
+<html>
 <head>
     <meta charset="UTF-8">
-    <title>Version Viewer Extension</title>
     <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/trimble-connect-workspace-api.js"></script>
     <style>
-        body { font-family: 'Segoe UI', sans-serif; padding: 15px; background: #f9f9f9; }
-        table { width: 100%; border-collapse: collapse; margin-top: 10px; background: white; }
-        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-        th { background-color: #0070ad; color: white; }
-        tr:nth-child(even) { background-color: #f2f2f2; }
-        .empty-msg { color: #666; font-style: italic; }
+        body { font-family: sans-serif; font-size: 14px; margin: 10px; }
+        .file-row { border-bottom: 1px solid #eee; padding: 5px 0; }
+        .version-badge { background: #0070ad; color: white; padding: 2px 6px; border-radius: 3px; font-weight: bold; }
     </style>
 </head>
 <body>
-    <h3>Ausgewählte Datei-Versionen</h3>
-    <div id="content">
-        <p class="empty-msg">Bitte wähle eine oder mehrere Dateien im Explorer aus.</p>
-    </div>
+    <h4>Datei-Versionen</h4>
+    <div id="file-list">Warte auf Auswahl im Explorer...</div>
 
     <script>
-        let api;
-
-        // Initialisierung der Verbindung zum Trimble Connect Host
-        TConnect.connect(window.parent, async (event, args) => {
-            switch(event) {
-                case "extension.onUpdate":
-                    // Wird aufgerufen, wenn sich im Projekt etwas ändert
-                    updateSelection();
-                    break;
+        // Initialisierung
+        TConnect.connect(window.parent, (event, args) => {
+            if (event === "explorer.onSelectionChanged" || event === "extension.onUpdate") {
+                fetchSelection();
             }
-        }).then(async (workspaceApi) => {
-            api = workspaceApi;
-            console.log("Trimble Connect API bereit.");
-            
-            // Sofortige Prüfung beim Laden
-            updateSelection();
+        }).then(api => {
+            window.tcApi = api;
+            fetchSelection();
         });
 
-        async function updateSelection() {
-            if (!api) return;
-
+        async function fetchSelection() {
+            if (!window.tcApi) return;
             try {
-                // Die aktuell im Explorer markierten Objekte abrufen
-                const selection = await api.explorer.getSelection();
-                const contentDiv = document.getElementById('content');
-
+                const selection = await window.tcApi.explorer.getSelection();
+                const display = document.getElementById("file-list");
+                
                 if (!selection || selection.length === 0) {
-                    contentDiv.innerHTML = '<p class="empty-msg">Keine Auswahl vorhanden.</p>';
+                    display.innerHTML = "Nichts ausgewählt.";
                     return;
                 }
 
-                let html = '<table><thead><tr><th>Name</th><th>Version / Revision</th></tr></thead><tbody>';
-                let filesFound = false;
-
+                let html = "";
                 selection.forEach(item => {
                     if (item.type === "FILE") {
-                        filesFound = true;
-                        // item.revision kommt direkt aus dem ConnectFile-Objekt der API
-                        html += `<tr><td>${item.name}</td><td><strong>V${item.revision || 1}</strong></td></tr>`;
+                        // Wir zeigen die Revision an
+                        html += `<div class="file-row">${item.name}: <span class="version-badge">V${item.revision || '1'}</span></div>`;
                     }
                 });
-
-                html += '</tbody></table>';
-
-                if (!filesFound) {
-                    contentDiv.innerHTML = '<p class="empty-msg">Keine Dateien ausgewählt (nur Ordner).</p>';
-                } else {
-                    contentDiv.innerHTML = html;
-                }
-            } catch (err) {
-                console.error("Fehler beim Abrufen der Auswahl:", err);
+                display.innerHTML = html || "Keine Dateien in der Auswahl.";
+            } catch (e) {
+                console.error("Fehler:", e);
             }
         }
     </script>
