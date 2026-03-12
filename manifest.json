@@ -1,8 +1,17 @@
 {
   "title": "Versionsinfo",
-  "icon": "https://www.schmees-luehn.de/fileadmin/Schmees-Luehn-Webseite/Team/Krzysztof_Mrozek.png",
-  "url": "https://schokitom.github.io/TC_Versions_Info/index.html",
+  "icon": "https://meinserver.de/trimble/extensions/versionsinfo/icon.png",
+  "url": "https://meinserver.de/trimble/extensions/versionsinfo/index.html",
   "description": "Liste aller PDF-Dateien mit Versionsinformationen",
-  "enabled": true
+  "enabled": true,
+  "workspace": {
+    "toolbar": {
+      "buttons": [
+        {
+          "title": "Versionsinfo",
+          "icon": "https://meinserver.de/trimble/extensions/versionsinfo/icon.png"
+        }
+      ]
+    }
+  }
 }
-
