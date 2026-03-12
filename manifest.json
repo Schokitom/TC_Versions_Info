@@ -1,6 +1,6 @@
 {
   "name": "File Version Viewer",
-  "identifier": "com.deinefirma.versionviewer",
+  "identifier": "com.schokitom.versionviewer",
   "version": "1.0.0",
   "description": "Zeigt die Revisionsnummer der ausgewählten Dateien an.",
   "icon": "https://img.icons8.com/color/48/000000/info.png",
@@ -12,7 +12,4 @@
       "url": "https://schokitom.github.io/TC_Versions_Info/index.html"
     }
   ]
-
 }
-
-
