@@ -200,6 +200,126 @@
       align-items: center;
       gap: 8px;
     }
+    td.name-cell .file-link {
+      color: var(--accent);
+      text-decoration: none;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      transition: color .15s;
+    }
+    td.name-cell .file-link:hover { color: #fff; text-decoration: underline; }
+
+    .open-btn {
+      flex-shrink: 0;
+      opacity: 0;
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 2px 6px;
+      cursor: pointer;
+      color: var(--muted);
+      font-size: 11px;
+      font-family: var(--font-ui);
+      transition: all .15s;
+      display: flex; align-items: center; gap: 3px;
+      white-space: nowrap;
+    }
+    .open-btn svg { width: 11px; height: 11px; fill: currentColor; }
+    tr:hover .open-btn { opacity: 1; }
+    .open-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--row-hover); }
+
+    /* clickable version badge */
+    .version-badge {
+      display: inline-flex; align-items: center; justify-content: center;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 2px 10px;
+      font-family: var(--font);
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--success);
+      min-width: 32px;
+      cursor: pointer;
+      transition: all .15s;
+    }
+    .version-badge:hover { border-color: var(--success); background: rgba(34,211,160,.08); }
+
+    /* ── Version Modal ── */
+    .modal-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,.65);
+      z-index: 200;
+      display: flex; align-items: center; justify-content: center;
+      padding: 20px;
+    }
+    .modal-overlay.hidden { display: none; }
+    .modal {
+      background: var(--surface);
+      border: 1px solid var(--accent2);
+      border-radius: 10px;
+      width: 100%; max-width: 620px;
+      max-height: 80vh;
+      display: flex; flex-direction: column;
+      box-shadow: 0 20px 60px rgba(0,0,0,.6);
+    }
+    .modal-header {
+      display: flex; align-items: center; gap: 10px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .modal-title { font-size: 13px; font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .modal-close {
+      background: none; border: none; cursor: pointer;
+      color: var(--muted); font-size: 18px; line-height: 1;
+      padding: 0 4px; transition: color .15s;
+    }
+    .modal-close:hover { color: var(--text); }
+    .modal-body { overflow-y: auto; flex: 1; padding: 0; }
+    .modal-body::-webkit-scrollbar { width: 4px; }
+    .modal-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .version-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .version-table thead th {
+      position: sticky; top: 0;
+      background: var(--bg);
+      padding: 8px 14px;
+      text-align: left;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      border-bottom: 1px solid var(--border);
+      cursor: default;
+    }
+    .version-table thead th:last-child { text-align: center; }
+    .version-table tbody tr { border-bottom: 1px solid var(--border); transition: background .1s; }
+    .version-table tbody tr:hover { background: var(--row-hover); }
+    .version-table td { padding: 9px 14px; vertical-align: middle; }
+    .ver-num {
+      display: inline-flex; align-items: center; justify-content: center;
+      background: var(--accent2);
+      color: #fff; font-family: var(--font); font-size: 10px; font-weight: 600;
+      border-radius: 10px; padding: 2px 8px; min-width: 28px;
+    }
+    .ver-open-btn {
+      background: none; border: 1px solid var(--border);
+      border-radius: 4px; padding: 3px 8px;
+      font-size: 11px; font-family: var(--font-ui); color: var(--muted);
+      cursor: pointer; transition: all .15s;
+      display: inline-flex; align-items: center; gap: 3px;
+    }
+    .ver-open-btn svg { width: 10px; height: 10px; fill: currentColor; }
+    .ver-open-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .modal-loading { text-align: center; padding: 40px; color: var(--muted); }
+    .modal-spinner {
+      width: 28px; height: 28px; margin: 0 auto 12px;
+      border: 2px solid var(--border); border-top-color: var(--accent);
+      border-radius: 50%; animation: spin .6s linear infinite;
+    }
     .pdf-icon {
       flex-shrink: 0;
       width: 22px; height: 22px;
@@ -338,20 +458,6 @@
     .path-option-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
     td.versions-cell {
       text-align: center;
-    }
-    .version-badge {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 2px 10px;
-      font-family: var(--font);
-      font-size: 11px;
-      font-weight: 500;
-      color: var(--success);
-      min-width: 32px;
     }
     td.date-cell {
       font-family: var(--font);
@@ -530,6 +636,23 @@
     </thead>
     <tbody id="tableBody"></tbody>
   </table>
+</div>
+
+<!-- Version Modal -->
+<div class="modal-overlay hidden" id="versionModal" onclick="closeVersionModal(event)">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="pdf-icon">PDF</div>
+      <div class="modal-title" id="modalTitle">Versionen</div>
+      <button class="modal-close" onclick="closeVersionModal()">✕</button>
+    </div>
+    <div class="modal-body" id="modalBody">
+      <div class="modal-loading">
+        <div class="modal-spinner"></div>
+        Lade Versionen…
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- Footer -->
@@ -842,11 +965,18 @@ function renderTable() {
     const initials = modBy.split(/[\s.@]+/).map(n => n[0]).filter(Boolean).join('').toUpperCase().slice(0, 2) || '?';
 
     const tr = document.createElement('tr');
+    const fileId = f.id || f.identifier;
+    const viewerUrl = `https://web.connect.trimble.com/projects/${projectId}/viewer/2d?modelId=${fileId}`;
+
     tr.innerHTML = `
       <td>
         <div class="name-cell">
           <div class="pdf-icon">PDF</div>
-          <span title="${escHtml(name)}">${escHtml(name)}</span>
+          <a class="file-link" href="${viewerUrl}" target="_blank" title="${escHtml(name)}">${escHtml(name)}</a>
+          <button class="open-btn" onclick="window.open('${viewerUrl}','_blank')" title="Im Trimble Viewer öffnen">
+            <svg viewBox="0 0 24 24"><path d="M19 19H5V5h7V3H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/></svg>
+            Öffnen
+          </button>
         </div>
       </td>
       <td class="user-cell">
@@ -856,7 +986,11 @@ function renderTable() {
         </div>
       </td>
       <td class="date-cell">${modAt}</td>
-      <td class="versions-cell"><span class="version-badge">${versions}</span></td>
+      <td class="versions-cell">
+        <span class="version-badge" onclick="openVersionModal('${escHtml(fileId)}','${escHtml(name)}')" title="Versionen anzeigen">
+          ${versions}
+        </span>
+      </td>
       <td class="path-cell" title="${escHtml(path)}">${escHtml(path || '/')}</td>
     `;
     tbody.appendChild(tr);
@@ -980,6 +1114,95 @@ document.addEventListener('click', e => {
     document.getElementById('pathDropdown')?.classList.add('hidden');
   }
 });
+
+// ─────────────────────────────────────────
+//  Version Modal
+// ─────────────────────────────────────────
+async function openVersionModal(fileId, fileName) {
+  const modal = document.getElementById('versionModal');
+  document.getElementById('modalTitle').textContent = fileName;
+  document.getElementById('modalBody').innerHTML = `
+    <div class="modal-loading">
+      <div class="modal-spinner"></div>
+      Lade Versionen…
+    </div>`;
+  modal.classList.remove('hidden');
+
+  try {
+    const data = await tcGet(`/files/${fileId}/versions?limit=500`);
+    const versions = Array.isArray(data) ? data
+      : (data.versions || data.list || data.items || []);
+
+    if (versions.length === 0) {
+      document.getElementById('modalBody').innerHTML =
+        `<div class="modal-loading">Keine Versionen gefunden.</div>`;
+      return;
+    }
+
+    // Sort: newest first (by createdOn / modifiedOn)
+    versions.sort((a, b) => {
+      const da = new Date(a.createdOn || a.modifiedOn || a.createdAt || 0);
+      const db = new Date(b.createdOn || b.modifiedOn || b.createdAt || 0);
+      return db - da;
+    });
+
+    const rows = versions.map((v, i) => {
+      const versionId  = v.id || v.identifier || v.versionId;
+      const versionNum = v.versionNumber || v.number || (versions.length - i);
+      const createdAt  = formatDate(v.createdOn || v.modifiedOn || v.createdAt || '');
+      const createdBy  = v.createdBy?.name || v.createdBy?.email
+        || (typeof v.createdBy === 'string' ? v.createdBy : null)
+        || v.modifiedBy?.name || v.modifiedBy?.email || '–';
+      const comment    = v.comment || v.description || v.changeDescription || '';
+      const size       = v.size ? formatSize(v.size) : '–';
+      const viewerUrl  = `https://web.connect.trimble.com/projects/${projectId}/viewer/2d?modelId=${fileId}&versionId=${versionId}`;
+
+      return `
+        <tr>
+          <td><span class="ver-num">v${versionNum}</span></td>
+          <td class="date-cell">${createdAt}</td>
+          <td class="user-cell" style="font-size:12px">${escHtml(createdBy)}</td>
+          <td style="font-size:11px;color:var(--muted);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(comment)}">${escHtml(comment) || '–'}</td>
+          <td style="font-family:var(--font);font-size:11px;color:var(--muted)">${size}</td>
+          <td style="text-align:center">
+            <button class="ver-open-btn" onclick="window.open('${viewerUrl}','_blank')" title="Diese Version öffnen">
+              <svg viewBox="0 0 24 24"><path d="M19 19H5V5h7V3H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/></svg>
+              Öffnen
+            </button>
+          </td>
+        </tr>`;
+    }).join('');
+
+    document.getElementById('modalBody').innerHTML = `
+      <table class="version-table">
+        <thead>
+          <tr>
+            <th>Version</th>
+            <th>Datum</th>
+            <th>Erstellt von</th>
+            <th>Kommentar</th>
+            <th>Größe</th>
+            <th>Aktion</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  } catch (err) {
+    document.getElementById('modalBody').innerHTML =
+      `<div class="modal-loading">Fehler: ${escHtml(err.message)}</div>`;
+  }
+}
+
+function closeVersionModal(event) {
+  if (event && event.target !== document.getElementById('versionModal')) return;
+  document.getElementById('versionModal').classList.add('hidden');
+}
+
+function formatSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
 
 // ─────────────────────────────────────────
 //  UI helpers
