@@ -497,8 +497,11 @@ async function tcGet(path) {
   return res.json();
 }
 
-/** Recursively collect all files using GET /folders/{id}/contents
- *  Falls back to GET /files?folderId={id} if the first endpoint returns 404.
+/** Recursively collect all files.
+ *  Tries known Trimble Connect API v2 folder endpoints in order:
+ *   1. GET /folders/{id}/items        (documented in forum + .NET SDK)
+ *   2. GET /folders/{id}/contents     (newer API versions)
+ *   3. GET /files?folderId={id}       (legacy fallback)
  */
 async function collectFiles(folderId, folderPath, depth = 0) {
   if (depth > 25) return [];
@@ -507,31 +510,53 @@ async function collectFiles(folderId, folderPath, depth = 0) {
   const limit = 500;
 
   while (true) {
-    // Primary endpoint (v2 Core API)
-    let data;
+    let data = null;
+
+    // Try endpoint 1: /folders/{id}/items
     try {
-      data = await tcGet(`/folders/${folderId}/contents?limit=${limit}&offset=${offset}`);
-    } catch (e) {
-      // Fallback: older endpoint style
+      data = await tcGet(`/folders/${folderId}/items?limit=${limit}&offset=${offset}`);
+    } catch (_) {}
+
+    // Try endpoint 2: /folders/{id}/contents
+    if (!data) {
       try {
-        data = await tcGet(`/files?folderId=${folderId}&limit=${limit}&offset=${offset}`);
-        // Normalise to {folders, files} shape
-        const all = Array.isArray(data) ? data : (data.list || data.items || []);
+        data = await tcGet(`/folders/${folderId}/contents?limit=${limit}&offset=${offset}`);
+      } catch (_) {}
+    }
+
+    // Try endpoint 3: legacy /files?folderId=
+    if (!data) {
+      try {
+        const raw = await tcGet(`/files?folderId=${folderId}&limit=${limit}&offset=${offset}`);
+        const all = Array.isArray(raw) ? raw : (raw.list || raw.items || []);
         data = {
           folders: all.filter(x => x.type === 'FOLDER' || x.isFolder || x.contentType === 'folder'),
           files:   all.filter(x => x.type !== 'FOLDER' && !x.isFolder && x.contentType !== 'folder'),
           totalCount: all.length
         };
-      } catch (e2) {
-        throw new Error(`Ordnerinhalt nicht ladbar (${folderId}): ${e.message}`);
-      }
+      } catch (_) {}
     }
 
-    const subFolders = data.folders || [];
-    const files      = data.files   || [];
+    if (!data) throw new Error(`Ordnerinhalt nicht ladbar: ${folderId}`);
+
+    // Normalise: handle both {folders, files} and flat {items} shapes
+    let subFolders = data.folders || [];
+    let files      = data.files   || [];
+
+    // Some endpoints return a flat "items" list with a "type" field
+    if (data.items && !data.folders && !data.files) {
+      subFolders = data.items.filter(x =>
+        x.type === 'FOLDER' || x.type === 'folder' || x.isFolder
+      );
+      files = data.items.filter(x =>
+        x.type !== 'FOLDER' && x.type !== 'folder' && !x.isFolder
+      );
+    }
 
     for (const folder of subFolders) {
-      const sub = await collectFiles(folder.id, `${folderPath}/${folder.name}`, depth + 1);
+      const fid  = folder.id || folder.identifier;
+      const name = folder.name || folder.title || fid;
+      const sub  = await collectFiles(fid, `${folderPath}/${name}`, depth + 1);
       items = items.concat(sub);
     }
     for (const file of files) {
@@ -578,16 +603,37 @@ async function loadFiles() {
     setLoadingMsg(`Region gefunden: ${tcApiBase.replace('https://','').split('/')[0]}`);
 
     // ── Step 2: Root folder ───────────────────────
-    // rootFolderId is already set from the Workspace API project object.
-    // If not available, fetch the project from the REST API as fallback.
+    setLoadingMsg('Rufe Projektinformationen ab…');
+    const project = await tcGet(`/projects/${projectId}`);
+    console.log('[Versionsinfo] Project response:', JSON.stringify(project).slice(0, 500));
+
+    // Try every known field name for the root folder identifier
+    rootFolderId = rootFolderId
+      || project.rootFolderIdentifier          // .NET SDK name (most common)
+      || project.rootFolder?.id
+      || project.rootFolder?.identifier
+      || project.rootFolderId
+      || project.root?.id
+      || project.root?.identifier
+      || project.identifier                    // some APIs return project id = root folder id
+      || null;
+
+    // Last resort: the project ID itself is sometimes usable as a folder ID
+    // Try listing it as a folder – if it works, use it
     if (!rootFolderId) {
-      setLoadingMsg('Rufe Projektinformationen ab…');
-      const project = await tcGet(`/projects/${projectId}`);
-      rootFolderId = project.rootFolder?.id
-        || project.rootFolderId
-        || project.root?.id;
+      try {
+        await tcGet(`/folders/${projectId}/items?limit=1`);
+        rootFolderId = projectId;
+        console.log('[Versionsinfo] Using projectId as rootFolderId');
+      } catch (_) {}
     }
-    if (!rootFolderId) throw new Error('Root-Ordner-ID konnte nicht ermittelt werden.');
+
+    if (!rootFolderId) {
+      throw new Error(
+        `Root-Ordner-ID nicht gefunden. Projektfelder: ${Object.keys(project).join(', ')}`
+      );
+    }
+    console.log('[Versionsinfo] rootFolderId:', rootFolderId);
     setProgress(20);
 
     setLoadingMsg('Durchsuche Ordnerstruktur…');
