@@ -794,11 +794,13 @@ function escHtml(str) {
     const projectName = projectInfo?.name || 'Unbekanntes Projekt';
     document.getElementById('projectBadge').textContent = projectName;
 
-    // Some API versions expose the root folder directly
-    rootFolderId = projectInfo?.rootFolder?.id
+    // Try to get rootFolderId from Workspace API project object (field name: rootId)
+    rootFolderId = projectInfo?.rootId           // confirmed field name from API response
+      || projectInfo?.rootFolder?.id
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
+    console.log('[Versionsinfo] v5 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
