@@ -602,38 +602,70 @@ async function loadFiles() {
     setProgress(15);
     setLoadingMsg(`Region gefunden: ${tcApiBase.replace('https://','').split('/')[0]}`);
 
-    // ── Step 2: Root folder ───────────────────────
-    setLoadingMsg('Rufe Projektinformationen ab…');
-    const project = await tcGet(`/projects/${projectId}`);
-    console.log('[Versionsinfo] Project response:', JSON.stringify(project).slice(0, 500));
+    // ── Step 2: Root folder – mehrere Strategien ─────────────────────────────
 
-    // Try every known field name for the root folder identifier
-    rootFolderId = rootFolderId
-      || project.rootFolderIdentifier          // .NET SDK name (most common)
-      || project.rootFolder?.id
-      || project.rootFolder?.identifier
-      || project.rootFolderId
-      || project.root?.id
-      || project.root?.identifier
-      || project.identifier                    // some APIs return project id = root folder id
-      || null;
-
-    // Last resort: the project ID itself is sometimes usable as a folder ID
-    // Try listing it as a folder – if it works, use it
+    // Strategie A: /folders?projectId={id} → liefert Liste, erster Eintrag = Root
     if (!rootFolderId) {
       try {
+        setLoadingMsg('Suche Root-Ordner (Strategie A)…');
+        const data = await tcGet(`/folders?projectId=${projectId}&limit=1`);
+        const list = Array.isArray(data) ? data : (data.list || data.folders || data.items || []);
+        if (list.length > 0) {
+          rootFolderId = list[0].id || list[0].identifier;
+          console.log('[Versionsinfo] Root via /folders?projectId:', rootFolderId);
+        }
+      } catch (e) { console.warn('[Versionsinfo] Strategie A fehlgeschlagen:', e.message); }
+    }
+
+    // Strategie B: /projects/{id} → diverse Feldnamen
+    if (!rootFolderId) {
+      try {
+        setLoadingMsg('Suche Root-Ordner (Strategie B)…');
+        const project = await tcGet(`/projects/${projectId}`);
+        console.log('[Versionsinfo] /projects response keys:', Object.keys(project).join(', '));
+        console.log('[Versionsinfo] /projects response:', JSON.stringify(project).slice(0, 600));
+        rootFolderId =
+          project.rootFolderIdentifier ||
+          project.rootFolder?.id       ||
+          project.rootFolder?.identifier ||
+          project.rootFolderId         ||
+          project.root?.id             ||
+          project.root?.identifier     ||
+          project.folderId             ||
+          null;
+        console.log('[Versionsinfo] Root via /projects:', rootFolderId);
+      } catch (e) { console.warn('[Versionsinfo] Strategie B fehlgeschlagen:', e.message); }
+    }
+
+    // Strategie C: /projects/{id}/folders → direkte Unterordner des Projekts
+    if (!rootFolderId) {
+      try {
+        setLoadingMsg('Suche Root-Ordner (Strategie C)…');
+        const data = await tcGet(`/projects/${projectId}/folders?limit=1`);
+        const list = Array.isArray(data) ? data : (data.list || data.folders || data.items || []);
+        if (list.length > 0) {
+          rootFolderId = list[0].id || list[0].identifier;
+          console.log('[Versionsinfo] Root via /projects/{id}/folders:', rootFolderId);
+        }
+      } catch (e) { console.warn('[Versionsinfo] Strategie C fehlgeschlagen:', e.message); }
+    }
+
+    // Strategie D: projectId direkt als folderId verwenden (Trimble nutzt manchmal gleiche IDs)
+    if (!rootFolderId) {
+      try {
+        setLoadingMsg('Suche Root-Ordner (Strategie D)…');
         await tcGet(`/folders/${projectId}/items?limit=1`);
         rootFolderId = projectId;
-        console.log('[Versionsinfo] Using projectId as rootFolderId');
-      } catch (_) {}
+        console.log('[Versionsinfo] Root via projectId als folderId:', rootFolderId);
+      } catch (e) { console.warn('[Versionsinfo] Strategie D fehlgeschlagen:', e.message); }
     }
 
     if (!rootFolderId) {
       throw new Error(
-        `Root-Ordner-ID nicht gefunden. Projektfelder: ${Object.keys(project).join(', ')}`
+        'Root-Ordner konnte mit keiner Strategie gefunden werden.\n' +
+        'Bitte öffne die Browser-Konsole (F12) und teile den "[Versionsinfo]"-Output.'
       );
     }
-    console.log('[Versionsinfo] rootFolderId:', rootFolderId);
     setProgress(20);
 
     setLoadingMsg('Durchsuche Ordnerstruktur…');
