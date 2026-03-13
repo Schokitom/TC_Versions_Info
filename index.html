@@ -497,12 +497,7 @@ async function tcGet(path) {
   return res.json();
 }
 
-/** Recursively collect all files.
- *  Tries known Trimble Connect API v2 folder endpoints in order:
- *   1. GET /folders/{id}/items        (documented in forum + .NET SDK)
- *   2. GET /folders/{id}/contents     (newer API versions)
- *   3. GET /files?folderId={id}       (legacy fallback)
- */
+/** Recursively collect all files via GET /folders/{id}/items */
 async function collectFiles(folderId, folderPath, depth = 0) {
   if (depth > 25) return [];
   let items = [];
@@ -510,48 +505,17 @@ async function collectFiles(folderId, folderPath, depth = 0) {
   const limit = 500;
 
   while (true) {
-    let data = null;
+    const data = await tcGet(`/folders/${folderId}/items?limit=${limit}&offset=${offset}`);
 
-    // Try endpoint 1: /folders/{id}/items
-    try {
-      data = await tcGet(`/folders/${folderId}/items?limit=${limit}&offset=${offset}`);
-    } catch (_) {}
+    // Response is either an array or { list: [...] } or { items: [...] }
+    const all = Array.isArray(data) ? data : (data.list || data.items || []);
 
-    // Try endpoint 2: /folders/{id}/contents
-    if (!data) {
-      try {
-        data = await tcGet(`/folders/${folderId}/contents?limit=${limit}&offset=${offset}`);
-      } catch (_) {}
-    }
-
-    // Try endpoint 3: legacy /files?folderId=
-    if (!data) {
-      try {
-        const raw = await tcGet(`/files?folderId=${folderId}&limit=${limit}&offset=${offset}`);
-        const all = Array.isArray(raw) ? raw : (raw.list || raw.items || []);
-        data = {
-          folders: all.filter(x => x.type === 'FOLDER' || x.isFolder || x.contentType === 'folder'),
-          files:   all.filter(x => x.type !== 'FOLDER' && !x.isFolder && x.contentType !== 'folder'),
-          totalCount: all.length
-        };
-      } catch (_) {}
-    }
-
-    if (!data) throw new Error(`Ordnerinhalt nicht ladbar: ${folderId}`);
-
-    // Normalise: handle both {folders, files} and flat {items} shapes
-    let subFolders = data.folders || [];
-    let files      = data.files   || [];
-
-    // Some endpoints return a flat "items" list with a "type" field
-    if (data.items && !data.folders && !data.files) {
-      subFolders = data.items.filter(x =>
-        x.type === 'FOLDER' || x.type === 'folder' || x.isFolder
-      );
-      files = data.items.filter(x =>
-        x.type !== 'FOLDER' && x.type !== 'folder' && !x.isFolder
-      );
-    }
+    const subFolders = all.filter(x =>
+      x.type === 'FOLDER' || x.type === 'folder' || x.isFolder
+    );
+    const files = all.filter(x =>
+      x.type !== 'FOLDER' && x.type !== 'folder' && !x.isFolder
+    );
 
     for (const folder of subFolders) {
       const fid  = folder.id || folder.identifier;
@@ -564,9 +528,9 @@ async function collectFiles(folderId, folderPath, depth = 0) {
       items.push(file);
     }
 
-    const total = data.totalCount ?? data.total ?? (subFolders.length + files.length);
+    const total = data.totalCount ?? data.total ?? all.length;
     offset += limit;
-    if (offset >= total || (subFolders.length + files.length) < limit) break;
+    if (offset >= total || all.length < limit) break;
   }
 
   return items;
@@ -602,70 +566,26 @@ async function loadFiles() {
     setProgress(15);
     setLoadingMsg(`Region gefunden: ${tcApiBase.replace('https://','').split('/')[0]}`);
 
-    // ── Step 2: Root folder – mehrere Strategien ─────────────────────────────
+    // ── Step 2: Root folder ──────────────────────────────────────────────────
+    setLoadingMsg('Rufe Projektinformationen ab…');
+    const project = await tcGet(`/projects/${projectId}`);
 
-    // Strategie A: /folders?projectId={id} → liefert Liste, erster Eintrag = Root
-    if (!rootFolderId) {
-      try {
-        setLoadingMsg('Suche Root-Ordner (Strategie A)…');
-        const data = await tcGet(`/folders?projectId=${projectId}&limit=1`);
-        const list = Array.isArray(data) ? data : (data.list || data.folders || data.items || []);
-        if (list.length > 0) {
-          rootFolderId = list[0].id || list[0].identifier;
-          console.log('[Versionsinfo] Root via /folders?projectId:', rootFolderId);
-        }
-      } catch (e) { console.warn('[Versionsinfo] Strategie A fehlgeschlagen:', e.message); }
-    }
-
-    // Strategie B: /projects/{id} → diverse Feldnamen
-    if (!rootFolderId) {
-      try {
-        setLoadingMsg('Suche Root-Ordner (Strategie B)…');
-        const project = await tcGet(`/projects/${projectId}`);
-        console.log('[Versionsinfo] /projects response keys:', Object.keys(project).join(', '));
-        console.log('[Versionsinfo] /projects response:', JSON.stringify(project).slice(0, 600));
-        rootFolderId =
-          project.rootFolderIdentifier ||
-          project.rootFolder?.id       ||
-          project.rootFolder?.identifier ||
-          project.rootFolderId         ||
-          project.root?.id             ||
-          project.root?.identifier     ||
-          project.folderId             ||
-          null;
-        console.log('[Versionsinfo] Root via /projects:', rootFolderId);
-      } catch (e) { console.warn('[Versionsinfo] Strategie B fehlgeschlagen:', e.message); }
-    }
-
-    // Strategie C: /projects/{id}/folders → direkte Unterordner des Projekts
-    if (!rootFolderId) {
-      try {
-        setLoadingMsg('Suche Root-Ordner (Strategie C)…');
-        const data = await tcGet(`/projects/${projectId}/folders?limit=1`);
-        const list = Array.isArray(data) ? data : (data.list || data.folders || data.items || []);
-        if (list.length > 0) {
-          rootFolderId = list[0].id || list[0].identifier;
-          console.log('[Versionsinfo] Root via /projects/{id}/folders:', rootFolderId);
-        }
-      } catch (e) { console.warn('[Versionsinfo] Strategie C fehlgeschlagen:', e.message); }
-    }
-
-    // Strategie D: projectId direkt als folderId verwenden (Trimble nutzt manchmal gleiche IDs)
-    if (!rootFolderId) {
-      try {
-        setLoadingMsg('Suche Root-Ordner (Strategie D)…');
-        await tcGet(`/folders/${projectId}/items?limit=1`);
-        rootFolderId = projectId;
-        console.log('[Versionsinfo] Root via projectId als folderId:', rootFolderId);
-      } catch (e) { console.warn('[Versionsinfo] Strategie D fehlgeschlagen:', e.message); }
-    }
+    // Das Feld heisst "rootId" in der Trimble Connect API (EU-Region bestätigt)
+    rootFolderId = rootFolderId
+      || project.rootId
+      || project.rootFolderIdentifier
+      || project.rootFolder?.id
+      || project.rootFolder?.identifier
+      || project.rootFolderId
+      || project.root?.id
+      || null;
 
     if (!rootFolderId) {
       throw new Error(
-        'Root-Ordner konnte mit keiner Strategie gefunden werden.\n' +
-        'Bitte öffne die Browser-Konsole (F12) und teile den "[Versionsinfo]"-Output.'
+        `Root-Ordner nicht gefunden. Verfügbare Felder: ${Object.keys(project).join(', ')}`
       );
     }
+    console.log('[Versionsinfo] rootFolderId:', rootFolderId);
     setProgress(20);
 
     setLoadingMsg('Durchsuche Ordnerstruktur…');
