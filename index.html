@@ -425,41 +425,43 @@ const TC_MASTER = 'https://app.connect.trimble.com/tc/api/2.0';
 
 /**
  * Discover the correct regional base URL via the official /regions endpoint.
- * Docs: GET {master}/regions  →  [{ name, location, origin, ... }, ...]
- * The project's region is encoded in the projectId prefix or can be found by
- * trying each region's /projects/{id} endpoint.
+ * Confirmed region base URLs (from Trimble documentation):
+ *   North America : https://app.connect.trimble.com
+ *   Europe        : https://app21.connect.trimble.com
+ *   Asia          : https://app31.connect.trimble.com
  */
 async function discoverApiBase() {
-  // Step 1: fetch all regions from the master endpoint (no auth needed)
-  let regions = [];
+  // Step 1: try to get regions dynamically from master (no auth needed)
+  const originUrls = [];
   try {
     const res = await fetch(`${TC_MASTER}/regions`);
     if (res.ok) {
       const data = await res.json();
-      // data may be an array or { list: [...] }
-      regions = Array.isArray(data) ? data : (data.list || data.regions || []);
+      const regions = Array.isArray(data) ? data : (data.list || data.regions || []);
+      for (const r of regions) {
+        const url = r.origin || r.url || r.endpoint;
+        if (url) {
+          // Normalise: strip trailing slash, ensure /tc/api/2.0 suffix
+          const base = url.replace(/\/$/, '') + '/tc/api/2.0';
+          if (!originUrls.includes(base)) originUrls.push(base);
+        }
+      }
     }
-  } catch (_) { /* fall through to hardcoded list */ }
+  } catch (_) { /* fall through */ }
 
-  // Extract origin URLs; always include master as first candidate
-  const originUrls = [TC_MASTER];
-  for (const r of regions) {
-    const url = r.origin || r.url || r.endpoint;
-    if (url && !originUrls.includes(url)) originUrls.push(url);
-  }
-  // Hardcoded fallbacks in case /regions is not reachable
-  const extras = [
-    'https://app.eu1.connect.trimble.com/tc/api/2.0',
-    'https://app.eu.connect.trimble.com/tc/api/2.0',
-    'https://app-stage.connect.trimble.com/tc/api/2.0',
+  // Step 2: always add the confirmed hardcoded URLs as fallback
+  const confirmed = [
+    'https://app.connect.trimble.com/tc/api/2.0',    // North America
+    'https://app21.connect.trimble.com/tc/api/2.0',  // Europe
+    'https://app31.connect.trimble.com/tc/api/2.0',  // Asia
   ];
-  for (const u of extras) {
+  for (const u of confirmed) {
     if (!originUrls.includes(u)) originUrls.push(u);
   }
 
   console.log('[Versionsinfo] Trying regions:', originUrls);
 
-  // Step 2: probe each region with the project ID
+  // Step 3: probe each with the project ID
   const errors = [];
   for (const base of originUrls) {
     try {
@@ -480,7 +482,7 @@ async function discoverApiBase() {
 
   throw new Error(
     'Projekt nicht erreichbar. Geprüfte Endpunkte:\n' + errors.join('\n') +
-    '\n\nMögliche Ursachen: CORS, falsches Token, oder Projekt-ID nicht gefunden.'
+    '\n\nMögliche Ursache: Projekt-ID nicht gefunden oder CORS-Problem.'
   );
 }
 
