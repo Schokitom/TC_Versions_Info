@@ -1,0 +1,1385 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Versionsinfo</title>
+  <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0f1117;
+      --surface:   #1a1d27;
+      --border:    #2a2d3e;
+      --accent:    #00c2ff;
+      --accent2:   #005f8a;
+      --text:      #e4e8f0;
+      --muted:     #7a8199;
+      --success:   #22d3a0;
+      --warning:   #f59e0b;
+      --danger:    #ef4444;
+      --row-hover: #1e2235;
+      --font:      'DM Mono', 'Fira Code', 'Courier New', monospace;
+      --font-ui:   'DM Sans', 'Segoe UI', sans-serif;
+    }
+
+    @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600&display=swap');
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-ui);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* ── Header ── */
+    header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 20px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+      flex-shrink: 0;
+    }
+    .header-icon {
+      width: 32px; height: 32px;
+      background: linear-gradient(135deg, var(--accent2), var(--accent));
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .header-icon svg { width: 18px; height: 18px; fill: #fff; }
+    h1 {
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      color: var(--text);
+    }
+    .project-badge {
+      margin-left: auto;
+      font-family: var(--font);
+      font-size: 11px;
+      color: var(--muted);
+      background: var(--bg);
+      border: 1px solid var(--border);
+      padding: 3px 10px;
+      border-radius: 20px;
+      max-width: 220px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* ── Toolbar ── */
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 20px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .search-wrap {
+      flex: 1;
+      position: relative;
+    }
+    .search-wrap svg {
+      position: absolute;
+      left: 10px; top: 50%;
+      transform: translateY(-50%);
+      width: 15px; height: 15px;
+      fill: var(--muted);
+    }
+    #searchInput {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 7px 10px 7px 32px;
+      font-size: 13px;
+      color: var(--text);
+      font-family: var(--font-ui);
+      outline: none;
+      transition: border-color .2s;
+    }
+    #searchInput:focus { border-color: var(--accent); }
+    #searchInput::placeholder { color: var(--muted); }
+
+    .btn {
+      display: flex; align-items: center; gap: 6px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 14px;
+      font-size: 12px;
+      font-family: var(--font-ui);
+      color: var(--text);
+      cursor: pointer;
+      transition: all .15s;
+      white-space: nowrap;
+    }
+    .btn:hover { border-color: var(--accent); color: var(--accent); }
+    .btn svg { width: 14px; height: 14px; fill: currentColor; }
+    .btn.primary {
+      background: var(--accent2);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    .btn.primary:hover { background: var(--accent); }
+
+    .stat-pill {
+      font-family: var(--font);
+      font-size: 11px;
+      color: var(--muted);
+      padding: 5px 12px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+    }
+    .stat-pill span { color: var(--accent); font-weight: 500; }
+
+    /* ── Table container ── */
+    .table-wrap {
+      flex: 1;
+      overflow-y: auto;
+      overflow-x: auto;
+      padding: 0 20px 20px;
+    }
+    .table-wrap::-webkit-scrollbar { width: 6px; height: 6px; }
+    .table-wrap::-webkit-scrollbar-track { background: transparent; }
+    .table-wrap::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      margin-top: 12px;
+      min-width: 760px;
+    }
+    thead th {
+      position: sticky; top: 0; z-index: 1;
+      background: var(--surface);
+      border-bottom: 2px solid var(--accent2);
+      padding: 10px 12px;
+      text-align: left;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      cursor: pointer;
+      user-select: none;
+      white-space: nowrap;
+      transition: color .15s;
+    }
+    thead th:hover { color: var(--accent); }
+    thead th .sort-icon { margin-left: 4px; opacity: .4; }
+    thead th.sorted { color: var(--accent); }
+    thead th.sorted .sort-icon { opacity: 1; }
+
+    tbody tr {
+      border-bottom: 1px solid var(--border);
+      transition: background .1s;
+    }
+    tbody tr:hover { background: var(--row-hover); }
+    td {
+      padding: 10px 12px;
+      vertical-align: middle;
+      color: var(--text);
+    }
+    td.name-cell {
+      font-family: var(--font);
+      font-size: 12.5px;
+      font-weight: 500;
+      color: var(--accent);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    td.name-cell .file-link {
+      color: var(--accent);
+      text-decoration: none;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      transition: color .15s;
+    }
+    td.name-cell .file-link:hover { color: #fff; text-decoration: underline; }
+
+    .open-btn {
+      flex-shrink: 0;
+      opacity: 0;
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 2px 6px;
+      cursor: pointer;
+      color: var(--muted);
+      font-size: 11px;
+      font-family: var(--font-ui);
+      transition: all .15s;
+      display: flex; align-items: center; gap: 3px;
+      white-space: nowrap;
+    }
+    .open-btn svg { width: 11px; height: 11px; fill: currentColor; }
+    tr:hover .open-btn { opacity: 1; }
+    .open-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--row-hover); }
+
+    /* clickable version badge */
+    .version-badge {
+      display: inline-flex; align-items: center; justify-content: center;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 2px 10px;
+      font-family: var(--font);
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--success);
+      min-width: 32px;
+      cursor: pointer;
+      transition: all .15s;
+    }
+    .version-badge:hover { border-color: var(--success); background: rgba(34,211,160,.08); }
+
+    /* ── Version Modal ── */
+    .modal-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,.65);
+      z-index: 200;
+      display: flex; align-items: center; justify-content: center;
+      padding: 20px;
+    }
+    .modal-overlay.hidden { display: none; }
+    .modal {
+      background: var(--surface);
+      border: 1px solid var(--accent2);
+      border-radius: 10px;
+      width: 100%; max-width: 620px;
+      max-height: 80vh;
+      display: flex; flex-direction: column;
+      box-shadow: 0 20px 60px rgba(0,0,0,.6);
+    }
+    .modal-header {
+      display: flex; align-items: center; gap: 10px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .modal-title { font-size: 13px; font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .modal-close {
+      background: none; border: none; cursor: pointer;
+      color: var(--muted); font-size: 18px; line-height: 1;
+      padding: 0 4px; transition: color .15s;
+    }
+    .modal-close:hover { color: var(--text); }
+    .modal-body { overflow-y: auto; flex: 1; padding: 0; }
+    .modal-body::-webkit-scrollbar { width: 4px; }
+    .modal-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .version-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .version-table thead th {
+      position: sticky; top: 0;
+      background: var(--bg);
+      padding: 8px 14px;
+      text-align: left;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      border-bottom: 1px solid var(--border);
+      cursor: default;
+    }
+    .version-table thead th:last-child { text-align: center; }
+    .version-table tbody tr { border-bottom: 1px solid var(--border); transition: background .1s; }
+    .version-table tbody tr:hover { background: var(--row-hover); }
+    .version-table td { padding: 9px 14px; vertical-align: middle; }
+    .ver-num {
+      display: inline-flex; align-items: center; justify-content: center;
+      background: var(--accent2);
+      color: #fff; font-family: var(--font); font-size: 10px; font-weight: 600;
+      border-radius: 10px; padding: 2px 8px; min-width: 28px;
+    }
+    .ver-open-btn {
+      background: none; border: 1px solid var(--border);
+      border-radius: 4px; padding: 3px 8px;
+      font-size: 11px; font-family: var(--font-ui); color: var(--muted);
+      cursor: pointer; transition: all .15s;
+      display: inline-flex; align-items: center; gap: 3px;
+    }
+    .ver-open-btn svg { width: 10px; height: 10px; fill: currentColor; }
+    .ver-open-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .modal-loading { text-align: center; padding: 40px; color: var(--muted); }
+    .modal-spinner {
+      width: 28px; height: 28px; margin: 0 auto 12px;
+      border: 2px solid var(--border); border-top-color: var(--accent);
+      border-radius: 50%; animation: spin .6s linear infinite;
+    }
+    .pdf-icon {
+      flex-shrink: 0;
+      width: 22px; height: 22px;
+      background: linear-gradient(135deg, #ef4444, #b91c1c);
+      border-radius: 4px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 7px;
+      font-weight: 700;
+      color: #fff;
+      letter-spacing: .03em;
+    }
+    td.path-cell {
+      font-family: var(--font);
+      font-size: 11px;
+      color: var(--muted);
+      max-width: 240px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* ── Path Dropdown Filter ── */
+    .path-filter-wrap {
+      position: relative;
+    }
+    .path-filter-btn {
+      display: flex; align-items: center; gap: 6px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 12px;
+      font-size: 12px;
+      font-family: var(--font-ui);
+      color: var(--text);
+      cursor: pointer;
+      transition: all .15s;
+      white-space: nowrap;
+      user-select: none;
+    }
+    .path-filter-btn:hover, .path-filter-btn.active { border-color: var(--accent); color: var(--accent); }
+    .path-filter-btn svg { width: 13px; height: 13px; fill: currentColor; flex-shrink: 0; }
+    .path-filter-badge {
+      background: var(--accent);
+      color: #000;
+      border-radius: 10px;
+      padding: 1px 6px;
+      font-size: 10px;
+      font-weight: 700;
+      min-width: 16px;
+      text-align: center;
+    }
+    .path-dropdown {
+      position: absolute;
+      top: calc(100% + 6px);
+      left: 0;
+      z-index: 100;
+      background: var(--surface);
+      border: 1px solid var(--accent2);
+      border-radius: 8px;
+      box-shadow: 0 8px 32px rgba(0,0,0,.5);
+      min-width: 280px;
+      max-width: 420px;
+      max-height: 360px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .path-dropdown.hidden { display: none; }
+    .path-dropdown-search {
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .path-dropdown-search input {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      padding: 5px 8px;
+      font-size: 12px;
+      color: var(--text);
+      font-family: var(--font-ui);
+      outline: none;
+    }
+    .path-dropdown-search input:focus { border-color: var(--accent); }
+    .path-dropdown-actions {
+      display: flex; gap: 6px;
+      padding: 6px 10px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .path-dropdown-actions button {
+      flex: 1;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 4px 8px;
+      font-size: 11px;
+      color: var(--muted);
+      cursor: pointer;
+      font-family: var(--font-ui);
+      transition: all .15s;
+    }
+    .path-dropdown-actions button:hover { border-color: var(--accent); color: var(--accent); }
+    .path-dropdown-list {
+      overflow-y: auto;
+      flex: 1;
+    }
+    .path-dropdown-list::-webkit-scrollbar { width: 4px; }
+    .path-dropdown-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+    .path-option {
+      display: flex; align-items: center; gap: 8px;
+      padding: 7px 12px;
+      cursor: pointer;
+      transition: background .1s;
+      font-family: var(--font);
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .path-option:hover { background: var(--row-hover); color: var(--text); }
+    .path-option.checked { color: var(--accent); }
+    .path-checkbox {
+      width: 14px; height: 14px;
+      border: 1.5px solid var(--border);
+      border-radius: 3px;
+      flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      transition: all .15s;
+    }
+    .path-option.checked .path-checkbox {
+      background: var(--accent);
+      border-color: var(--accent);
+    }
+    .path-checkbox svg { width: 9px; height: 9px; fill: #000; display: none; }
+    .path-option.checked .path-checkbox svg { display: block; }
+    .path-option-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+    td.versions-cell {
+      text-align: center;
+    }
+    td.date-cell {
+      font-family: var(--font);
+      font-size: 11px;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    td.user-cell {
+      font-size: 12px;
+    }
+    .user-chip {
+      display: inline-flex; align-items: center; gap: 6px;
+    }
+    .avatar {
+      width: 22px; height: 22px;
+      background: linear-gradient(135deg, var(--accent2), var(--accent));
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 9px;
+      font-weight: 600;
+      color: #fff;
+      flex-shrink: 0;
+    }
+
+    /* ── Loading / Error / Empty ── */
+    .state-overlay {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      padding: 40px;
+    }
+    .spinner {
+      width: 40px; height: 40px;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .state-title { font-size: 15px; font-weight: 500; color: var(--text); }
+    .state-sub { font-size: 13px; color: var(--muted); text-align: center; max-width: 340px; }
+
+    .error-icon { font-size: 36px; }
+
+    /* ── Progress bar ── */
+    .progress-bar-wrap {
+      height: 2px;
+      background: var(--border);
+      flex-shrink: 0;
+      overflow: hidden;
+    }
+    .progress-bar {
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent2), var(--accent));
+      width: 0%;
+      transition: width .3s ease;
+    }
+
+    /* ── Footer ── */
+    footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 20px;
+      border-top: 1px solid var(--border);
+      font-size: 11px;
+      color: var(--muted);
+      flex-shrink: 0;
+    }
+    footer .status { display: flex; align-items: center; gap: 6px; }
+    .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); }
+    .dot.loading { background: var(--warning); animation: pulse .8s ease-in-out infinite; }
+    .dot.error { background: var(--danger); }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+  </style>
+</head>
+<body>
+
+<!-- Header -->
+<header>
+  <div class="header-icon">
+    <svg viewBox="0 0 24 24"><path d="M6 2a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6H6zm7 1.5L18.5 9H13V3.5zM8 13h8v1H8v-1zm0 3h8v1H8v-1zm0-6h4v1H8v-1z"/></svg>
+  </div>
+  <h1>Versionsinfo</h1>
+  <div class="project-badge" id="projectBadge">Verbinde...</div>
+</header>
+
+<!-- Progress bar -->
+<div class="progress-bar-wrap">
+  <div class="progress-bar" id="progressBar"></div>
+</div>
+
+<!-- Toolbar (hidden until loaded) -->
+<div class="toolbar" id="toolbar" style="display:none">
+  <div class="search-wrap">
+    <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+    <input type="text" id="searchInput" placeholder="Dateiname suchen…" oninput="filterTable()" />
+  </div>
+
+  <!-- Path filter dropdown -->
+  <div class="path-filter-wrap" id="pathFilterWrap">
+    <div class="path-filter-btn" id="pathFilterBtn" onclick="togglePathDropdown()">
+      <svg viewBox="0 0 24 24"><path d="M10 18h4v-2h-4v2zM3 6v2h18V6H3zm3 7h12v-2H6v2z"/></svg>
+      <span id="pathFilterLabel">Pfad filtern</span>
+      <span class="path-filter-badge" id="pathFilterBadge" style="display:none">0</span>
+      <svg viewBox="0 0 24 24" id="pathFilterChevron" style="margin-left:2px"><path d="M7 10l5 5 5-5z"/></svg>
+    </div>
+    <div class="path-dropdown hidden" id="pathDropdown">
+      <div class="path-dropdown-search">
+        <input type="text" placeholder="Pfad suchen…" oninput="filterPathOptions(this.value)" id="pathSearch" />
+      </div>
+      <div class="path-dropdown-actions">
+        <button onclick="selectAllPaths()">Alle auswählen</button>
+        <button onclick="clearAllPaths()">Alle abwählen</button>
+      </div>
+      <div class="path-dropdown-list" id="pathOptionsList"></div>
+    </div>
+  </div>
+
+  <div class="stat-pill">Gesamt: <span id="totalCount">0</span></div>
+  <button class="btn primary" onclick="loadFiles()">
+    <svg viewBox="0 0 24 24"><path d="M17.65 6.35A7.958 7.958 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+    Aktualisieren
+  </button>
+</div>
+
+<!-- Loading state -->
+<div class="state-overlay" id="stateLoading">
+  <div class="spinner"></div>
+  <div class="state-title">Lade PDF-Dateien…</div>
+  <div class="state-sub" id="loadingMessage">Verbinde mit Trimble Connect API</div>
+</div>
+
+<!-- Error state -->
+<div class="state-overlay" id="stateError" style="display:none">
+  <div class="error-icon">⚠️</div>
+  <div class="state-title">Verbindung fehlgeschlagen</div>
+  <div class="state-sub" id="errorMessage">Fehler beim Laden der Daten.</div>
+  <button class="btn primary" onclick="loadFiles()">
+    <svg viewBox="0 0 24 24"><path d="M17.65 6.35A7.958 7.958 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+    Erneut versuchen
+  </button>
+</div>
+
+<!-- Empty state -->
+<div class="state-overlay" id="stateEmpty" style="display:none">
+  <div class="error-icon">📂</div>
+  <div class="state-title">Keine PDF-Dateien gefunden</div>
+  <div class="state-sub">Im Explorer dieses Projekts sind keine PDF-Dokumente vorhanden.</div>
+</div>
+
+<!-- Table -->
+<div class="table-wrap" id="tableWrap" style="display:none">
+  <table id="fileTable">
+    <thead>
+      <tr>
+        <th onclick="sortTable('name')" id="th-name">
+          Name <span class="sort-icon">↕</span>
+        </th>
+        <th onclick="sortTable('modifiedBy')" id="th-modifiedBy">
+          Geändert von <span class="sort-icon">↕</span>
+        </th>
+        <th onclick="sortTable('modifiedAt')" id="th-modifiedAt">
+          Letzte Änderung <span class="sort-icon">↕</span>
+        </th>
+        <th onclick="sortTable('versions')" id="th-versions" style="text-align:center">
+          Versionen <span class="sort-icon">↕</span>
+        </th>
+        <th onclick="sortTable('path')" id="th-path">
+          Pfad <span class="sort-icon">↕</span>
+        </th>
+      </tr>
+    </thead>
+    <tbody id="tableBody"></tbody>
+  </table>
+</div>
+
+<!-- Version Modal -->
+<div class="modal-overlay hidden" id="versionModal" onclick="closeVersionModal(event)">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="pdf-icon">PDF</div>
+      <div class="modal-title" id="modalTitle">Versionen</div>
+      <button class="modal-close" onclick="closeVersionModal()">✕</button>
+    </div>
+    <div class="modal-body" id="modalBody">
+      <div class="modal-loading">
+        <div class="modal-spinner"></div>
+        Lade Versionen…
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Footer -->
+<footer>
+  <div class="status">
+    <div class="dot" id="statusDot"></div>
+    <span id="statusText">Initialisierung…</span>
+  </div>
+  <span>Trimble Connect · Versionsinfo Extension</span>
+</footer>
+
+<script>
+// ─────────────────────────────────────────
+//  State
+// ─────────────────────────────────────────
+let API = null;
+let accessToken = null;
+let projectId = null;
+let rootFolderId = null;
+let tcApiBase = null;
+let allFiles = [];
+let sortKey = 'name';
+let sortAsc = true;
+let selectedPaths = new Set(); // leeres Set = alle anzeigen
+
+// ─────────────────────────────────────────
+//  Trimble Connect REST helpers
+// ─────────────────────────────────────────
+
+const TC_MASTER = 'https://app.connect.trimble.com/tc/api/2.0';
+
+/**
+ * Discover the correct regional base URL via the official /regions endpoint.
+ * Confirmed region base URLs (from Trimble documentation):
+ *   North America : https://app.connect.trimble.com
+ *   Europe        : https://app21.connect.trimble.com
+ *   Asia          : https://app31.connect.trimble.com
+ */
+async function discoverApiBase() {
+  // Step 1: try to get regions dynamically from master (no auth needed)
+  const originUrls = [];
+  try {
+    const res = await fetch(`${TC_MASTER}/regions`);
+    if (res.ok) {
+      const data = await res.json();
+      const regions = Array.isArray(data) ? data : (data.list || data.regions || []);
+      for (const r of regions) {
+        const url = r.origin || r.url || r.endpoint;
+        if (url) {
+          // Normalise: strip trailing slash, ensure /tc/api/2.0 suffix
+          const base = url.replace(/\/$/, '') + '/tc/api/2.0';
+          if (!originUrls.includes(base)) originUrls.push(base);
+        }
+      }
+    }
+  } catch (_) { /* fall through */ }
+
+  // Step 2: always add the confirmed hardcoded URLs as fallback
+  const confirmed = [
+    'https://app.connect.trimble.com/tc/api/2.0',    // North America
+    'https://app21.connect.trimble.com/tc/api/2.0',  // Europe
+    'https://app31.connect.trimble.com/tc/api/2.0',  // Asia
+  ];
+  for (const u of confirmed) {
+    if (!originUrls.includes(u)) originUrls.push(u);
+  }
+
+  console.log('[Versionsinfo] Trying regions:', originUrls);
+
+  // Step 3: probe each with the project ID
+  const errors = [];
+  for (const base of originUrls) {
+    try {
+      const res = await fetch(`${base}/projects/${projectId}`, {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
+      console.log(`[Versionsinfo] ${base} → ${res.status}`);
+      if (res.ok) return base;
+      if (res.status === 401) {
+        throw new Error('Zugriffstoken abgelaufen oder ungültig (401). Bitte die Extension neu laden.');
+      }
+      errors.push(`${base}: HTTP ${res.status}`);
+    } catch (e) {
+      if (e.message.includes('401')) throw e;
+      errors.push(`${base}: ${e.message}`);
+    }
+  }
+
+  throw new Error(
+    'Projekt nicht erreichbar. Geprüfte Endpunkte:\n' + errors.join('\n') +
+    '\n\nMögliche Ursache: Projekt-ID nicht gefunden oder CORS-Problem.'
+  );
+}
+
+async function tcGet(path) {
+  const res = await fetch(`${tcApiBase}${path}`, {
+    headers: { Authorization: `Bearer ${accessToken}` }
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`API ${res.status}: ${path}\n${body.slice(0, 200)}`);
+  }
+  return res.json();
+}
+
+/** Recursively collect all files via GET /folders/{id}/items */
+async function collectFiles(folderId, folderPath, depth = 0) {
+  if (depth > 25) return [];
+  let items = [];
+  let offset = 0;
+  const limit = 500;
+
+  while (true) {
+    const data = await tcGet(`/folders/${folderId}/items?limit=${limit}&offset=${offset}`);
+
+    // Response is either an array or { list: [...] } or { items: [...] }
+    const all = Array.isArray(data) ? data : (data.list || data.items || []);
+
+    const subFolders = all.filter(x =>
+      x.type === 'FOLDER' || x.type === 'folder' || x.isFolder
+    );
+    const files = all.filter(x =>
+      x.type !== 'FOLDER' && x.type !== 'folder' && !x.isFolder
+    );
+
+    for (const folder of subFolders) {
+      const fid  = folder.id || folder.identifier;
+      const name = folder.name || folder.title || fid;
+      const sub  = await collectFiles(fid, `${folderPath}/${name}`, depth + 1);
+      items = items.concat(sub);
+    }
+    for (const file of files) {
+      file._path = folderPath || '/';
+      // Log first file to identify correct field names
+      if (depth === 0 && items.length === 0 && files.indexOf(file) === 0) {
+        console.log('[Versionsinfo] Sample file object keys:', Object.keys(file).join(', '));
+        console.log('[Versionsinfo] Sample file object:', JSON.stringify(file).slice(0, 400));
+      }
+      items.push(file);
+    }
+
+    const total = data.totalCount ?? data.total ?? all.length;
+    offset += limit;
+    if (offset >= total || all.length < limit) break;
+  }
+
+  return items;
+}
+
+/**
+ * Extract file ID from a file object — tries all known Trimble field names.
+ * Logs all fields if no ID found (helps debugging unknown response schemas).
+ */
+function getFileId(f) {
+  const id = f.id || f.identifier || f.fileId || f.fileIdentifier || f.objectId
+    || f.entityId || f.tcFileId || f.versionId || null;
+  if (!id && !window._fileIdWarnLogged) {
+    console.warn('[Versionsinfo] Konnte fileId nicht finden. Alle Felder:', Object.keys(f).join(', '));
+    console.warn('[Versionsinfo] File-Objekt:', JSON.stringify(f).slice(0, 500));
+    window._fileIdWarnLogged = true;
+  }
+  return id;
+}
+
+/**
+ * Open a file in the Trimble 2D Viewer.
+ * Uses Workspace API if possible, falls back to URL.
+ */
+async function openFile(idx, versionId) {
+  const f = allFiles[idx];
+  if (!f) return;
+  const fileId = getFileId(f);
+  if (!fileId) {
+    console.error('[Versionsinfo] Kein fileId für Datei:', f.name, '| Alle Felder:', Object.keys(f).join(', '));
+    alert(`Datei-ID nicht gefunden für "${f.name}". Bitte F12 → Konsole prüfen.`);
+    return;
+  }
+
+  // The Trimble 2D Viewer URL uses the file's versionId as modelId.
+  // If the file object has a versionId directly, use it; otherwise use fileId.
+  const modelId = versionId || f.versionId || f.latestVersionId || f.currentVersionId || fileId;
+  const url = `https://web.connect.trimble.com/projects/${projectId}/viewer/2d?modelId=${modelId}`;
+  console.log('[Versionsinfo] Öffne Datei:', f.name, '| fileId:', fileId, '| modelId:', modelId, '| URL:', url);
+  window.open(url, '_blank');
+}
+
+/** Get file version count: GET /files/{id}/versions */
+async function getVersionCount(file) {
+  // Extract file ID from all possible field names
+  const fileId = file.id || file.identifier || file.fileId || file.fileIdentifier || file.objectId;
+  if (!fileId) {
+    console.warn('[Versionsinfo] Kein fileId gefunden. Felder:', Object.keys(file).join(', '));
+    console.warn('[Versionsinfo] File-Objekt:', JSON.stringify(file).slice(0, 300));
+    return 1;
+  }
+  try {
+    const data = await tcGet(`/files/${fileId}/versions?limit=500`);
+    // Log first version to identify field names
+    const list = Array.isArray(data) ? data : (data.versions || data.list || data.items || []);
+    if (list.length > 0 && !window._versionFieldsLogged) {
+      console.log('[Versionsinfo] Sample version keys:', Object.keys(list[0]).join(', '));
+      console.log('[Versionsinfo] Sample version:', JSON.stringify(list[0]).slice(0, 300));
+      window._versionFieldsLogged = true;
+    }
+    if (Array.isArray(data)) return data.length;
+    if (Array.isArray(data.versions)) return data.versions.length;
+    if (Array.isArray(data.list)) return data.list.length;
+    if (typeof data.totalCount === 'number') return data.totalCount;
+    return list.length || 1;
+  } catch {
+    return 1;
+  }
+}
+
+// ─────────────────────────────────────────
+//  Main load function
+// ─────────────────────────────────────────
+async function loadFiles() {
+  showState('loading');
+  setProgress(5);
+  setStatus('loading', 'Lade Projektstruktur…');
+
+  try {
+    // ── Step 1: Region-Discovery ──────────────────
+    setLoadingMsg('Ermittle Region für dieses Projekt…');
+    tcApiBase = await discoverApiBase();
+    setProgress(15);
+    setLoadingMsg(`Region gefunden: ${tcApiBase.replace('https://','').split('/')[0]}`);
+
+    // ── Step 2: Root folder ──────────────────────────────────────────────────
+    setLoadingMsg('Rufe Projektinformationen ab…');
+    const project = await tcGet(`/projects/${projectId}`);
+
+    // Das Feld heisst "rootId" in der Trimble Connect API (EU-Region bestätigt)
+    rootFolderId = rootFolderId
+      || project.rootId
+      || project.rootFolderIdentifier
+      || project.rootFolder?.id
+      || project.rootFolder?.identifier
+      || project.rootFolderId
+      || project.root?.id
+      || null;
+
+    if (!rootFolderId) {
+      throw new Error(
+        `Root-Ordner nicht gefunden. Verfügbare Felder: ${Object.keys(project).join(', ')}`
+      );
+    }
+    console.log('[Versionsinfo] rootFolderId:', rootFolderId);
+    setProgress(20);
+
+    setLoadingMsg('Durchsuche Ordnerstruktur…');
+    const allEntries = await collectFiles(rootFolderId, '');
+    setProgress(55);
+
+    // Filter PDFs
+    const pdfFiles = allEntries.filter(f => {
+      const name = (f.name || '').toLowerCase();
+      return name.endsWith('.pdf');
+    });
+
+    if (pdfFiles.length === 0) {
+      setProgress(100);
+      showState('empty');
+      setStatus('ok', `Keine PDF-Dateien gefunden`);
+      return;
+    }
+
+    setLoadingMsg(`Lade Versionsdaten für ${pdfFiles.length} PDF-Dateien…`);
+
+    // Load version counts
+    const step = 40 / pdfFiles.length;
+    let progress = 55;
+    for (const f of pdfFiles) {
+      f._versionCount = await getVersionCount(f);
+      progress += step;
+      setProgress(Math.min(progress, 95));
+    }
+
+    allFiles = pdfFiles;
+    selectedPaths.clear(); // Reset filter on reload
+    setProgress(100);
+    buildPathDropdown();
+    renderTable();
+    showState('table');
+    document.getElementById('toolbar').style.display = 'flex';
+    document.getElementById('totalCount').textContent = allFiles.length;
+    setStatus('ok', `${allFiles.length} PDF-Dateien geladen`);
+
+  } catch (err) {
+    console.error(err);
+    document.getElementById('errorMessage').textContent = err.message || String(err);
+    showState('error');
+    setStatus('error', 'Fehler beim Laden');
+  }
+}
+
+// ─────────────────────────────────────────
+//  Table rendering
+// ─────────────────────────────────────────
+function getFileValue(f, key) {
+  switch (key) {
+    case 'name': return (f.name || '').toLowerCase();
+    case 'modifiedBy': return getModifiedBy(f).toLowerCase();
+    case 'modifiedAt': return getModifiedAt(f);
+    case 'versions': return f._versionCount || 1;
+    case 'path': return (f._path || '').toLowerCase();
+    default: return '';
+  }
+}
+
+function getModifiedBy(f) {
+  return f.modifiedBy?.name || f.modifiedBy?.email
+    || (typeof f.modifiedBy === 'string' ? f.modifiedBy : null)
+    || f.lastModifiedBy?.name || f.lastModifiedBy?.email
+    || (typeof f.lastModifiedBy === 'string' ? f.lastModifiedBy : null)
+    || f.updatedBy?.name || f.updatedBy?.email
+    || f.createdBy?.name || f.createdBy?.email
+    || 'Unbekannt';
+}
+
+function getModifiedAt(f) {
+  // Trimble Connect API: "modifiedOn" ist das Feld aus dem Explorer "Geändert"
+  return f.modifiedOn || f.modifiedAt || f.updatedOn || f.updatedAt
+    || f.lastModifiedAt || f.lastModifiedOn || f.createdOn || f.createdAt || '';
+}
+
+function renderTable() {
+  const query = (document.getElementById('searchInput')?.value || '').toLowerCase();
+
+  let data = allFiles.filter(f => {
+    // Textsuche
+    if (query) {
+      const name = (f.name || '').toLowerCase();
+      const path = (f._path || '').toLowerCase();
+      if (!name.includes(query) && !path.includes(query)) return false;
+    }
+    // Pfadfilter
+    if (selectedPaths.size > 0) {
+      const path = f._path || '/';
+      if (!selectedPaths.has(path)) return false;
+    }
+    return true;
+  });
+
+  // Sort
+  data.sort((a, b) => {
+    let va = getFileValue(a, sortKey);
+    let vb = getFileValue(b, sortKey);
+    if (sortKey === 'versions') { va = Number(va); vb = Number(vb); }
+    if (va < vb) return sortAsc ? -1 : 1;
+    if (va > vb) return sortAsc ? 1 : -1;
+    return 0;
+  });
+
+  const tbody = document.getElementById('tableBody');
+  tbody.innerHTML = '';
+
+  for (const f of data) {
+    const name     = f.name || '–';
+    const modBy    = getModifiedBy(f);
+    const modAt    = formatDate(getModifiedAt(f));
+    const versions = f._versionCount || 1;
+    const path     = f._path || '/';
+    const initials = modBy.split(/[\s.@]+/).map(n => n[0]).filter(Boolean).join('').toUpperCase().slice(0, 2) || '?';
+
+    // Store full object reference by index for openFile()
+    const idx = allFiles.indexOf(f);
+
+    const fileId    = getFileId(f);
+    const hasId     = !!fileId;
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>
+        <div class="name-cell">
+          <div class="pdf-icon">PDF</div>
+          <span class="file-link ${hasId ? 'clickable' : ''}"
+                title="${escHtml(name)}"
+                ${hasId ? `onclick="openFile(${idx})"` : ''}>
+            ${escHtml(name)}
+          </span>
+          <button class="open-btn"
+                  ${hasId ? `onclick="openFile(${idx})"` : 'disabled style="opacity:.3;cursor:default"'}
+                  title="Im Trimble Viewer öffnen">
+            <svg viewBox="0 0 24 24"><path d="M19 19H5V5h7V3H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/></svg>
+            Öffnen
+          </button>
+        </div>
+      </td>
+      <td class="user-cell">
+        <div class="user-chip">
+          <div class="avatar">${escHtml(initials)}</div>
+          <span>${escHtml(modBy)}</span>
+        </div>
+      </td>
+      <td class="date-cell">${modAt}</td>
+      <td class="versions-cell">
+        <span class="version-badge"
+              onclick="openVersionModal(${idx},'${escHtml(name)}')"
+              title="Versionen anzeigen">
+          ${versions}
+        </span>
+      </td>
+      <td class="path-cell" title="${escHtml(path)}">${escHtml(path || '/')}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+
+  // Sort indicators
+  ['name','modifiedBy','modifiedAt','versions','path'].forEach(k => {
+    const th = document.getElementById(`th-${k}`);
+    if (!th) return;
+    if (k === sortKey) {
+      th.classList.add('sorted');
+      th.querySelector('.sort-icon').textContent = sortAsc ? ' ↑' : ' ↓';
+    } else {
+      th.classList.remove('sorted');
+      th.querySelector('.sort-icon').textContent = ' ↕';
+    }
+  });
+}
+
+function sortTable(key) {
+  if (sortKey === key) sortAsc = !sortAsc;
+  else { sortKey = key; sortAsc = true; }
+  renderTable();
+}
+
+function filterTable() { renderTable(); }
+
+// ─────────────────────────────────────────
+//  Path dropdown
+// ─────────────────────────────────────────
+function buildPathDropdown() {
+  // Alle eindeutigen Pfade aus den geladenen Dateien
+  const paths = [...new Set(allFiles.map(f => f._path || '/'))].sort();
+  renderPathOptions(paths, '');
+}
+
+function renderPathOptions(paths, filter) {
+  const list = document.getElementById('pathOptionsList');
+  list.innerHTML = '';
+  const filtered = filter ? paths.filter(p => p.toLowerCase().includes(filter.toLowerCase())) : paths;
+  for (const path of filtered) {
+    const isChecked = selectedPaths.has(path);
+    const div = document.createElement('div');
+    div.className = 'path-option' + (isChecked ? ' checked' : '');
+    div.title = path;
+    div.innerHTML = `
+      <div class="path-checkbox">
+        <svg viewBox="0 0 12 12"><path d="M2 6l3 3 5-5" stroke="#000" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <span class="path-option-label">${escHtml(path)}</span>
+    `;
+    div.onclick = () => togglePath(path);
+    list.appendChild(div);
+  }
+}
+
+function filterPathOptions(value) {
+  const paths = [...new Set(allFiles.map(f => f._path || '/'))].sort();
+  renderPathOptions(paths, value);
+}
+
+function togglePath(path) {
+  if (selectedPaths.has(path)) selectedPaths.delete(path);
+  else selectedPaths.add(path);
+  updatePathFilterUI();
+  renderTable();
+  // Re-render options to update checkboxes
+  const searchVal = document.getElementById('pathSearch')?.value || '';
+  filterPathOptions(searchVal);
+}
+
+function selectAllPaths() {
+  allFiles.forEach(f => selectedPaths.add(f._path || '/'));
+  updatePathFilterUI();
+  renderTable();
+  filterPathOptions(document.getElementById('pathSearch')?.value || '');
+}
+
+function clearAllPaths() {
+  selectedPaths.clear();
+  updatePathFilterUI();
+  renderTable();
+  filterPathOptions(document.getElementById('pathSearch')?.value || '');
+}
+
+function updatePathFilterUI() {
+  const badge = document.getElementById('pathFilterBadge');
+  const label = document.getElementById('pathFilterLabel');
+  const btn   = document.getElementById('pathFilterBtn');
+  const count = selectedPaths.size;
+  if (count === 0) {
+    badge.style.display = 'none';
+    label.textContent = 'Pfad filtern';
+    btn.classList.remove('active');
+  } else {
+    badge.style.display = 'inline-block';
+    badge.textContent = count;
+    label.textContent = count === 1 ? '1 Pfad' : `${count} Pfade`;
+    btn.classList.add('active');
+  }
+}
+
+function togglePathDropdown() {
+  const dd = document.getElementById('pathDropdown');
+  const isOpen = !dd.classList.contains('hidden');
+  if (isOpen) {
+    dd.classList.add('hidden');
+  } else {
+    dd.classList.remove('hidden');
+    document.getElementById('pathSearch').value = '';
+    buildPathDropdown();
+    // Focus search
+    setTimeout(() => document.getElementById('pathSearch').focus(), 50);
+  }
+}
+
+// Close dropdown when clicking outside
+document.addEventListener('click', e => {
+  const wrap = document.getElementById('pathFilterWrap');
+  if (wrap && !wrap.contains(e.target)) {
+    document.getElementById('pathDropdown')?.classList.add('hidden');
+  }
+});
+
+// ─────────────────────────────────────────
+//  Version Modal
+// ─────────────────────────────────────────
+async function openVersionModal(idx, fileName) {
+  const f = allFiles[idx];
+  const fileId = f ? getFileId(f) : null;
+  if (!fileId) {
+    alert('Datei-ID nicht verfügbar. Bitte Konsole (F12) prüfen.');
+    return;
+  }
+  const modal = document.getElementById('versionModal');
+  document.getElementById('modalTitle').textContent = fileName;
+  document.getElementById('modalBody').innerHTML = `
+    <div class="modal-loading">
+      <div class="modal-spinner"></div>
+      Lade Versionen…
+    </div>`;
+  modal.classList.remove('hidden');
+
+  try {
+    const data = await tcGet(`/files/${fileId}/versions?limit=500`);
+    const versions = Array.isArray(data) ? data
+      : (data.versions || data.list || data.items || []);
+
+    if (versions.length === 0) {
+      document.getElementById('modalBody').innerHTML =
+        `<div class="modal-loading">Keine Versionen gefunden.</div>`;
+      return;
+    }
+
+    // Sort: newest first (by createdOn / modifiedOn)
+    versions.sort((a, b) => {
+      const da = new Date(a.createdOn || a.modifiedOn || a.createdAt || 0);
+      const db = new Date(b.createdOn || b.modifiedOn || b.createdAt || 0);
+      return db - da;
+    });
+
+    const rows = versions.map((v, i) => {
+      const vId        = v.id || v.identifier || v.versionId;
+      const versionNum = v.versionNumber || v.number || (versions.length - i);
+      const createdAt  = formatDate(v.createdOn || v.modifiedOn || v.createdAt || '');
+      const createdBy  = v.createdBy?.name || v.createdBy?.email
+        || (typeof v.createdBy === 'string' ? v.createdBy : null)
+        || v.modifiedBy?.name || v.modifiedBy?.email || '–';
+      const comment    = v.comment || v.description || v.changeDescription || '';
+      const size       = v.size ? formatSize(v.size) : '–';
+      // Per Trimble docs: modelId = versionId of the file version
+      const viewerUrl  = `https://web.connect.trimble.com/projects/${projectId}/viewer/2d?modelId=${vId || fileId}`;
+
+      return `
+        <tr>
+          <td><span class="ver-num">v${versionNum}</span></td>
+          <td class="date-cell">${createdAt}</td>
+          <td class="user-cell" style="font-size:12px">${escHtml(createdBy)}</td>
+          <td style="font-size:11px;color:var(--muted);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(comment)}">${escHtml(comment) || '–'}</td>
+          <td style="font-family:var(--font);font-size:11px;color:var(--muted)">${size}</td>
+          <td style="text-align:center">
+            <button class="ver-open-btn" onclick="window.open('${escHtml(viewerUrl)}','_blank')" title="Diese Version öffnen">
+              <svg viewBox="0 0 24 24"><path d="M19 19H5V5h7V3H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/></svg>
+              Öffnen
+            </button>
+          </td>
+        </tr>`;
+    }).join('');
+
+    document.getElementById('modalBody').innerHTML = `
+      <table class="version-table">
+        <thead>
+          <tr>
+            <th>Version</th>
+            <th>Datum</th>
+            <th>Erstellt von</th>
+            <th>Kommentar</th>
+            <th>Größe</th>
+            <th>Aktion</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  } catch (err) {
+    document.getElementById('modalBody').innerHTML =
+      `<div class="modal-loading">Fehler: ${escHtml(err.message)}</div>`;
+  }
+}
+
+function closeVersionModal(event) {
+  if (event && event.target !== document.getElementById('versionModal')) return;
+  document.getElementById('versionModal').classList.add('hidden');
+}
+
+function formatSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+// ─────────────────────────────────────────
+//  UI helpers
+// ─────────────────────────────────────────
+function showState(s) {
+  document.getElementById('stateLoading').style.display = s === 'loading' ? 'flex' : 'none';
+  document.getElementById('stateError').style.display   = s === 'error'   ? 'flex' : 'none';
+  document.getElementById('stateEmpty').style.display   = s === 'empty'   ? 'flex' : 'none';
+  document.getElementById('tableWrap').style.display    = s === 'table'   ? 'block': 'none';
+}
+
+function setProgress(pct) {
+  document.getElementById('progressBar').style.width = pct + '%';
+  if (pct >= 100) setTimeout(() => document.getElementById('progressBar').style.width = '0%', 600);
+}
+
+function setLoadingMsg(msg) {
+  const el = document.getElementById('loadingMessage');
+  if (el) el.textContent = msg;
+}
+
+function setStatus(type, msg) {
+  const dot = document.getElementById('statusDot');
+  dot.className = 'dot' + (type === 'loading' ? ' loading' : type === 'error' ? ' error' : '');
+  document.getElementById('statusText').textContent = msg;
+}
+
+function formatDate(iso) {
+  if (!iso) return '–';
+  try {
+    const d = new Date(iso);
+    return d.toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit', year:'numeric' })
+      + ' ' + d.toLocaleTimeString('de-DE', { hour:'2-digit', minute:'2-digit' });
+  } catch { return iso; }
+}
+
+function escHtml(str) {
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ─────────────────────────────────────────
+//  Trimble Workspace API init
+// ─────────────────────────────────────────
+(async () => {
+  try {
+    API = await TrimbleConnectWorkspace.connect(
+      window.parent,
+      async (event, args) => {
+        if (event === 'extension.accessToken') {
+          accessToken = args.data;
+        }
+        if (event === 'extension.command') {
+          // handle menu commands if needed
+        }
+      },
+      30000
+    );
+
+    // Set navigation menu
+    await API.ui.setMenu({
+      title: 'Versionsinfo',
+      icon: 'https://cdn-icons-png.flaticon.com/512/337/337946.png',
+      command: 'versionsinfo_main'
+    });
+
+    // Get project info from Workspace API
+    const projectInfo = await API.project.getCurrentProject();
+    projectId = projectInfo?.id;
+    const projectName = projectInfo?.name || 'Unbekanntes Projekt';
+    document.getElementById('projectBadge').textContent = projectName;
+
+    // Try to get rootFolderId from Workspace API project object (field name: rootId)
+    rootFolderId = projectInfo?.rootId           // confirmed field name from API response
+      || projectInfo?.rootFolder?.id
+      || projectInfo?.rootFolderId
+      || projectInfo?.root?.id
+      || null;
+    console.log('[Versionsinfo] v6 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+
+    // Request access token
+    setLoadingMsg('Anfrage für Zugriffstoken…');
+    const tokenResult = await API.extension.requestPermission('accesstoken');
+    if (tokenResult && tokenResult !== 'pending' && tokenResult !== 'denied') {
+      accessToken = tokenResult;
+    }
+
+    // Wait briefly for token event if still pending
+    if (!accessToken) {
+      await new Promise(r => setTimeout(r, 2000));
+    }
+
+    if (!accessToken) {
+      throw new Error('Kein Zugriffstoken erhalten. Bitte Berechtigungen in den Extension-Einstellungen erlauben.');
+    }
+
+    await loadFiles();
+
+  } catch (err) {
+    console.error('Init error:', err);
+    document.getElementById('errorMessage').textContent = err.message || String(err);
+    showState('error');
+    setStatus('error', 'Initialisierungsfehler');
+  }
+})();
+</script>
+</body>
+</html>
