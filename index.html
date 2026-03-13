@@ -421,35 +421,67 @@ let sortAsc = true;
 //  Trimble Connect REST helpers
 // ─────────────────────────────────────────
 
-/** Discover the correct regional base URL for this project.
- *  Strategy:
- *  1. Try NA master: GET /regions  → find the region whose projects list
- *     contains our projectId (or just use the first region with a valid origin).
- *  2. Fall back to the URL embedded in the project object from Workspace API.
+const TC_MASTER = 'https://app.connect.trimble.com/tc/api/2.0';
+
+/**
+ * Discover the correct regional base URL via the official /regions endpoint.
+ * Docs: GET {master}/regions  →  [{ name, location, origin, ... }, ...]
+ * The project's region is encoded in the projectId prefix or can be found by
+ * trying each region's /projects/{id} endpoint.
  */
 async function discoverApiBase() {
-  // The Workspace API project object often contains the region/server directly.
-  // We'll try the NA master first; if our project call fails (404), we try EU.
-  const candidates = [
-    'https://app.connect.trimble.com/tc/api/2.0',
-    'https://app.eu.connect.trimble.com/tc/api/2.0',
-    'https://app.asia.connect.trimble.com/tc/api/2.0'
-  ];
+  // Step 1: fetch all regions from the master endpoint (no auth needed)
+  let regions = [];
+  try {
+    const res = await fetch(`${TC_MASTER}/regions`);
+    if (res.ok) {
+      const data = await res.json();
+      // data may be an array or { list: [...] }
+      regions = Array.isArray(data) ? data : (data.list || data.regions || []);
+    }
+  } catch (_) { /* fall through to hardcoded list */ }
 
-  for (const base of candidates) {
+  // Extract origin URLs; always include master as first candidate
+  const originUrls = [TC_MASTER];
+  for (const r of regions) {
+    const url = r.origin || r.url || r.endpoint;
+    if (url && !originUrls.includes(url)) originUrls.push(url);
+  }
+  // Hardcoded fallbacks in case /regions is not reachable
+  const extras = [
+    'https://app.eu1.connect.trimble.com/tc/api/2.0',
+    'https://app.eu.connect.trimble.com/tc/api/2.0',
+    'https://app-stage.connect.trimble.com/tc/api/2.0',
+  ];
+  for (const u of extras) {
+    if (!originUrls.includes(u)) originUrls.push(u);
+  }
+
+  console.log('[Versionsinfo] Trying regions:', originUrls);
+
+  // Step 2: probe each region with the project ID
+  const errors = [];
+  for (const base of originUrls) {
     try {
       const res = await fetch(`${base}/projects/${projectId}`, {
         headers: { Authorization: `Bearer ${accessToken}` }
       });
+      console.log(`[Versionsinfo] ${base} → ${res.status}`);
       if (res.ok) return base;
-      if (res.status === 401) throw new Error('Zugriffstoken ungültig (401)');
-      // 404 or other → try next region
+      if (res.status === 401) {
+        throw new Error('Zugriffstoken abgelaufen oder ungültig (401). Bitte die Extension neu laden.');
+      }
+      errors.push(`${base}: HTTP ${res.status}`);
     } catch (e) {
       if (e.message.includes('401')) throw e;
-      // network error → try next
+      errors.push(`${base}: ${e.message}`);
     }
   }
-  throw new Error('Projekt nicht gefunden – kein passender Region-Endpunkt gefunden.');
+
+  throw new Error(
+    'Projekt nicht erreichbar. Geprüfte Endpunkte:\n' + errors.join('\n') +
+    '\n\nMögliche Ursachen: CORS, falsches Token, oder Projekt-ID nicht gefunden.'
+  );
 }
 
 async function tcGet(path) {
@@ -458,46 +490,53 @@ async function tcGet(path) {
   });
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    throw new Error(`API ${res.status}: ${path} — ${body.slice(0, 120)}`);
+    throw new Error(`API ${res.status}: ${path}\n${body.slice(0, 200)}`);
   }
   return res.json();
 }
 
-/** Recursively collect all files in a folder using the correct endpoint.
- *  Trimble Connect API v2: GET /folders/{id}/contents
- *  Response: { folders: [...], files: [...] }
+/** Recursively collect all files using GET /folders/{id}/contents
+ *  Falls back to GET /files?folderId={id} if the first endpoint returns 404.
  */
 async function collectFiles(folderId, folderPath, depth = 0) {
   if (depth > 25) return [];
   let items = [];
-
   let offset = 0;
   const limit = 500;
 
   while (true) {
-    const data = await tcGet(
-      `/folders/${folderId}/contents?limit=${limit}&offset=${offset}&embedUser=true`
-    );
-
-    // folders
-    const subFolders = data.folders || [];
-    for (const folder of subFolders) {
-      const sub = await collectFiles(
-        folder.id,
-        `${folderPath}/${folder.name}`,
-        depth + 1
-      );
-      items = items.concat(sub);
+    // Primary endpoint (v2 Core API)
+    let data;
+    try {
+      data = await tcGet(`/folders/${folderId}/contents?limit=${limit}&offset=${offset}`);
+    } catch (e) {
+      // Fallback: older endpoint style
+      try {
+        data = await tcGet(`/files?folderId=${folderId}&limit=${limit}&offset=${offset}`);
+        // Normalise to {folders, files} shape
+        const all = Array.isArray(data) ? data : (data.list || data.items || []);
+        data = {
+          folders: all.filter(x => x.type === 'FOLDER' || x.isFolder || x.contentType === 'folder'),
+          files:   all.filter(x => x.type !== 'FOLDER' && !x.isFolder && x.contentType !== 'folder'),
+          totalCount: all.length
+        };
+      } catch (e2) {
+        throw new Error(`Ordnerinhalt nicht ladbar (${folderId}): ${e.message}`);
+      }
     }
 
-    // files
-    const files = data.files || [];
+    const subFolders = data.folders || [];
+    const files      = data.files   || [];
+
+    for (const folder of subFolders) {
+      const sub = await collectFiles(folder.id, `${folderPath}/${folder.name}`, depth + 1);
+      items = items.concat(sub);
+    }
     for (const file of files) {
       file._path = folderPath || '/';
       items.push(file);
     }
 
-    // pagination
     const total = data.totalCount ?? data.total ?? (subFolders.length + files.length);
     offset += limit;
     if (offset >= total || (subFolders.length + files.length) < limit) break;
@@ -534,6 +573,7 @@ async function loadFiles() {
     setLoadingMsg('Ermittle Region für dieses Projekt…');
     tcApiBase = await discoverApiBase();
     setProgress(15);
+    setLoadingMsg(`Region gefunden: ${tcApiBase.replace('https://','').split('/')[0]}`);
 
     // ── Step 2: Root folder ───────────────────────
     // rootFolderId is already set from the Workspace API project object.
@@ -630,7 +670,12 @@ function renderTable() {
 
   for (const f of data) {
     const name = f.name || '–';
-    const modBy = f.modifiedBy?.name || f.modifiedBy || f.lastModifiedBy || f.createdBy?.name || 'Unbekannt';
+    const modBy = f.modifiedBy?.name || f.modifiedBy?.email
+      || (typeof f.modifiedBy === 'string' ? f.modifiedBy : null)
+      || f.lastModifiedBy?.name || f.lastModifiedBy?.email
+      || (typeof f.lastModifiedBy === 'string' ? f.lastModifiedBy : null)
+      || f.createdBy?.name || f.createdBy?.email
+      || 'Unbekannt';
     const modAt = formatDate(f.modifiedAt || f.updatedAt || f.lastModifiedAt || f.createdAt);
     const versions = f._versionCount || 1;
     const path = f._path || '/';
