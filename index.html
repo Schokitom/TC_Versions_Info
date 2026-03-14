@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>S&L Explorer</title>
+  <title>S+L Explorer</title>
   <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -560,7 +560,7 @@
     <img src="https://media.licdn.com/dms/image/v2/D4E0BAQFkh3KHnkwrxA/company-logo_200_200/company-logo_200_200/0/1695102076020/schmees_lhn_holz_und_stahlingenieurbau_logo?e=2147483647&v=beta&t=bPWGeKm0FMe6DWDhjaSIWMlMjxCJ9nid-cXjAb3E6Tg"
          alt="S&L Logo" style="width:28px;height:28px;object-fit:contain;border-radius:4px;" />
   </div>
-  <h1>S&amp;L Explorer</h1>
+  <h1>S+L Explorer</h1>
   <div class="project-badge" id="projectBadge">Verbinde...</div>
 </header>
 
@@ -678,7 +678,7 @@
     <div class="dot" id="statusDot"></div>
     <span id="statusText">Initialisierung…</span>
   </div>
-  <span>Trimble Connect · S&amp;L Explorer</span>
+  <span>Trimble Connect · S+L Explorer</span>
 </footer>
 
 <script>
@@ -737,7 +737,7 @@ async function discoverApiBase() {
     if (!originUrls.includes(u)) originUrls.push(u);
   }
 
-  console.log('[S&L Explorer] Trying regions:', originUrls);
+  console.log('[S+L Explorer] Trying regions:', originUrls);
 
   // Step 3: probe each with the project ID
   const errors = [];
@@ -746,7 +746,7 @@ async function discoverApiBase() {
       const res = await fetch(`${base}/projects/${projectId}`, {
         headers: { Authorization: `Bearer ${accessToken}` }
       });
-      console.log(`[S&L Explorer] ${base} → ${res.status}`);
+      console.log(`[S+L Explorer] ${base} → ${res.status}`);
       if (res.ok) return base;
       if (res.status === 401) {
         throw new Error('Zugriffstoken abgelaufen oder ungültig (401). Bitte die Extension neu laden.');
@@ -822,7 +822,7 @@ async function collectFiles(folderId, folderPath, depth = 0) {
 function getFileId(f) {
   const id = f.id || f.versionId || f.identifier || null;
   if (!id && !window._fileIdWarnLogged) {
-    console.warn('[S&L Explorer] Kein fileId! Felder:', Object.keys(f).join(', '));
+    console.warn('[S+L Explorer] Kein fileId! Felder:', Object.keys(f).join(', '));
     window._fileIdWarnLogged = true;
   }
   return id;
@@ -857,7 +857,7 @@ async function downloadFile(idx, explicitVersionId) {
       window.open(fallbackUrl, '_blank');
     }
   } catch (err) {
-    console.error('[S&L Explorer] Download-Fehler:', err);
+    console.error('[S+L Explorer] Download-Fehler:', err);
     // Fallback: API-URL direkt öffnen
     window.open(`${tcApiBase}/files/${versionId}/download`, '_blank');
   }
@@ -877,8 +877,8 @@ async function getPersistentFileId(versionId) {
     const data = await tcGet(`/files/${versionId}`);
     // Log once to see the structure
     if (!window._fileDetailLogged) {
-      console.log('[S&L Explorer] GET /files/{id} keys:', Object.keys(data).join(', '));
-      console.log('[S&L Explorer] GET /files/{id}:', JSON.stringify(data).slice(0, 400));
+      console.log('[S+L Explorer] GET /files/{id} keys:', Object.keys(data).join(', '));
+      console.log('[S+L Explorer] GET /files/{id}:', JSON.stringify(data).slice(0, 400));
       window._fileDetailLogged = true;
     }
     // If the file has a parentType=FILE, the parentId is the persistent file container ID
@@ -917,7 +917,7 @@ async function openFile(idx, explicitVersionId) {
     // Fallback: nur versionId (öffnet leider "Keine Vorschau")
     url = `https://web.connect.trimble.com/projects/${projectId}/viewer/2D?id=${versionId}&version=${versionId}&type=revisions&etag=${versionId}`;
   }
-  console.log('[S&L Explorer] Öffne:', f.name, '| persistentId:', persistentId, '| versionId:', versionId);
+  console.log('[S+L Explorer] Öffne:', f.name, '| persistentId:', persistentId, '| versionId:', versionId);
   window.open(url, '_blank');
 }
 
@@ -969,7 +969,7 @@ async function loadFiles() {
         `Root-Ordner nicht gefunden. Verfügbare Felder: ${Object.keys(project).join(', ')}`
       );
     }
-    console.log('[S&L Explorer] rootFolderId:', rootFolderId);
+    console.log('[S+L Explorer] rootFolderId:', rootFolderId);
     setProgress(20);
 
     setLoadingMsg('Durchsuche Ordnerstruktur…');
@@ -1414,7 +1414,7 @@ function escHtml(str) {
 
     // Set navigation menu
     await API.ui.setMenu({
-      title: 'S&L Explorer',
+      title: 'S+L Explorer',
       icon: 'https://media.licdn.com/dms/image/v2/D4E0BAQFkh3KHnkwrxA/company-logo_200_200/company-logo_200_200/0/1695102076020/schmees_lhn_holz_und_stahlingenieurbau_logo?e=2147483647&v=beta&t=bPWGeKm0FMe6DWDhjaSIWMlMjxCJ9nid-cXjAb3E6Tg',
       command: 'sl_explorer_main'
     });
@@ -1431,7 +1431,7 @@ function escHtml(str) {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S&L Explorer] v9 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v10 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
