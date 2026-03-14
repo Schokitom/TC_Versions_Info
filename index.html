@@ -278,8 +278,9 @@
     .preview-iframe-wrap iframe {
       border: none;
       background: #fff;
-      transform-origin: top left;
       display: block;
+      width: 100%;
+      height: 100%;
     }
     .preview-placeholder {
       display: flex;
@@ -1207,19 +1208,18 @@ function applyZoom(z) {
 
   const isImg = iframe.tagName === 'IMG';
   if (isImg) {
-    // For images: just scale with transform, simpler
-    iframe.style.transform = `scale(${currentZoom})`;
-    iframe.style.transformOrigin = 'top center';
+    // CSS zoom scales the rendered content sharply (no pixel upscaling)
+    iframe.style.zoom = currentZoom;
+    iframe.style.transform = 'none';
+    iframe.style.width = '100%';
     iframe.style.maxWidth = 'none';
-    iframe.style.width = (100 / currentZoom) + '%';
   } else {
-    // For iframes: resize so scroll works correctly
-    const panelW = wrap.clientWidth  || 380;
-    const panelH = wrap.clientHeight || 500;
-    iframe.style.width  = (panelW  / currentZoom) + 'px';
-    iframe.style.height = (panelH / currentZoom) + 'px';
-    iframe.style.transform = `scale(${currentZoom})`;
-    iframe.style.transformOrigin = 'top left';
+    // For iframe: CSS zoom re-renders content at target resolution → sharp at all sizes
+    // width/height stay 100% of the wrap — zoom handles the rest
+    iframe.style.zoom = currentZoom;
+    iframe.style.transform = 'none';
+    iframe.style.width  = '100%';
+    iframe.style.height = '100%';
   }
 
   // Update UI
@@ -1239,14 +1239,14 @@ function zoomSet(val) {
   applyZoom(val);
 }
 
-// Mouse-wheel zoom inside preview panel
+// Mouse-wheel zoom inside preview panel (Ctrl + scroll)
 document.addEventListener('wheel', e => {
-  const wrap = document.getElementById('previewIframeWrap');
-  if (!wrap || !wrap.contains(e.target)) return;
-  if (!e.ctrlKey && !e.metaKey) return; // only when Ctrl held (like browser zoom)
+  const panel = document.getElementById('previewPanel');
+  if (!panel || !panel.classList.contains('open')) return;
+  if (!panel.contains(e.target)) return;
+  if (!e.ctrlKey && !e.metaKey) return;
   e.preventDefault();
-  const delta = e.deltaY < 0 ? 0.1 : -0.1;
-  zoomStep(delta);
+  zoomStep(e.deltaY < 0 ? 0.1 : -0.1);
 }, { passive: false });
 
 // Holt persistente File-ID via GET /files/{versionId} → parentId wenn parentType=FILE
@@ -1821,7 +1821,7 @@ function escHtml(str) {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v13 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v14 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
