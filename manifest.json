@@ -1,7 +1,7 @@
 {
   "title": "S+L Explorer",
   "icon": "https://media.licdn.com/dms/image/v2/D4E0BAQFkh3KHnkwrxA/company-logo_200_200/company-logo_200_200/0/1695102076020/schmees_lhn_holz_und_stahlingenieurbau_logo?e=2147483647&v=beta&t=bPWGeKm0FMe6DWDhjaSIWMlMjxCJ9nid-cXjAb3E6Tg",
-  "url": "https://YOUR_HOSTING_URL/index.html",
+  "url": "https://schokitom.github.io/TC_Versions_Info/index.html",
   "description": "Listet alle PDF-Dateien des Projekts mit Versionsinformationen und Download-Funktion auf.",
   "enabled": true
 }
