@@ -1119,56 +1119,25 @@ async function openPreview(idx) {
     const persistentId = f._persistentFileId || await getPersistentFileId(versionId);
     if (persistentId) f._persistentFileId = persistentId;
 
-    // Step 2: Build preview URL.
-    // Trimble's /files/{id}/download returns a 302 redirect to a pre-signed S3 URL.
-    // fetch() follows it automatically → we get the final URL from response.url
-    let previewUrl = null;
-    try {
-      const resp = await fetch(`${tcApiBase}/files/${versionId}/download`, {
-        method: 'GET',
-        headers: { Authorization: `Bearer ${accessToken}` },
-        redirect: 'follow'
-      });
-      if (resp.ok || resp.redirected) {
-        // Use the final redirected URL (pre-signed S3, no auth needed)
-        previewUrl = resp.url;
-      }
-      console.log('[S+L Explorer] Preview URL:', previewUrl, '| status:', resp.status, '| redirected:', resp.redirected);
-    } catch (e) {
-      console.warn('[S+L Explorer] Download-URL Fehler:', e.message);
-    }
+    // thumbnailUrl is an Array in Trimble API — pick the largest available
+    const thumbArr = Array.isArray(f.thumbnailUrl) ? f.thumbnailUrl : (f.thumbnailUrl ? [f.thumbnailUrl] : []);
+    // Each entry may be a string URL or object with {url, size} — extract URL
+    const thumbUrls = thumbArr.map(t => (typeof t === 'string' ? t : (t.url || t.href || t.link || null))).filter(Boolean);
+    // Prefer largest (last in array is usually highest res in Trimble)
+    const thumb = thumbUrls[thumbUrls.length - 1] || null;
+    console.log('[S+L Explorer] thumbnailUrl resolved:', thumb);
 
-    // Step 3: fallback to thumbnailUrl if no download URL
-    const thumb = f.thumbnailUrl || null;
-    console.log('[S+L Explorer] thumbnailUrl:', thumb);
-
-    if (previewUrl) {
-      previewBaseUrl = previewUrl; // store for zoom reloads
-      const initZoom = Math.round(currentZoom * 100);
+    if (thumb) {
+      previewBaseUrl = thumb;
       body.innerHTML = `<div class="preview-iframe-wrap" id="previewIframeWrap">
-        <iframe id="previewIframe"
-                src="${previewUrl}#zoom=${initZoom}&toolbar=1"
-                title="${escHtml(f.name)}"></iframe>
-      </div>`;
-      document.getElementById('zoomToolbar').style.display = 'flex';
-      // Update slider label without reloading iframe
-      const slider = document.getElementById('zoomSlider');
-      const label  = document.getElementById('zoomLabel');
-      if (slider) slider.value = currentZoom;
-      if (label)  label.textContent = initZoom + '%';
-    } else if (thumb) {
-      previewBaseUrl = null;
-      body.innerHTML = `<div class="preview-iframe-wrap" id="previewIframeWrap"
-              style="overflow:auto;display:flex;align-items:flex-start;justify-content:center;padding:8px">
         <img id="previewIframe" src="${thumb}"
-             style="display:block;width:100%;image-rendering:crisp-edges" alt="Vorschau"
-             onerror="this.parentNode.innerHTML='<div class=preview-placeholder style=padding:20px><svg viewBox=\\'0 0 24 24\\' width=\\'48\\' height=\\'48\\'><path d=\\'M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6zm-1 1.5L18.5 9H13V3.5z\\' fill=\\'currentColor\\'/></svg><div>Keine Vorschau</div></div>'" />
+             style="display:block;width:100%;height:auto;image-rendering:auto"
+             alt="Vorschau" />
       </div>`;
       document.getElementById('zoomToolbar').style.display = 'flex';
-      const slider = document.getElementById('zoomSlider');
-      const label  = document.getElementById('zoomLabel');
-      if (slider) slider.value = 1;
-      if (label)  label.textContent = '100%';
+      currentZoom = 1.0;
+      // slight delay so DOM is ready
+      setTimeout(() => applyZoom(1.0), 50);
     } else {
       previewBaseUrl = null;
       body.innerHTML = `<div class="preview-placeholder">
@@ -1221,11 +1190,15 @@ let previewBaseUrl = null; // base URL without fragment
 function applyZoom(z) {
   currentZoom = Math.min(3, Math.max(0.3, parseFloat(z.toFixed(2))));
 
-  const iframe = document.getElementById('previewIframe');
-  if (iframe && previewBaseUrl) {
-    const pct = Math.round(currentZoom * 100);
-    // PDF #zoom= param: re-renders at target scale → sharp at every size
-    iframe.src = `${previewBaseUrl}#zoom=${pct}&toolbar=1`;
+  const wrap   = document.getElementById('previewIframeWrap');
+  const img    = document.getElementById('previewIframe');
+  if (wrap && img && img.tagName === 'IMG') {
+    // Scale image by adjusting width — browser re-renders at new size (sharp)
+    // overflow:auto on wrap provides scrollbars when zoomed in
+    wrap.style.overflow = 'auto';
+    wrap.style.alignItems = 'flex-start';
+    img.style.width  = Math.round(currentZoom * 100) + '%';
+    img.style.height = 'auto';
   }
 
   const slider = document.getElementById('zoomSlider');
@@ -1825,7 +1798,7 @@ function escHtml(str) {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v15 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v16 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
