@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Versionsinfo</title>
+  <title>S&L Explorer</title>
   <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -229,7 +229,22 @@
     tr:hover .open-btn { opacity: 1; }
     .open-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--row-hover); }
 
-    /* clickable version badge */
+    /* download button */
+    .dl-btn {
+      opacity: 0;
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 3px 5px;
+      cursor: pointer;
+      color: var(--muted);
+      transition: all .15s;
+      display: inline-flex; align-items: center; justify-content: center;
+    }
+    tr:hover .dl-btn { opacity: 1; }
+    .dl-btn:hover { border-color: #2e7d32; color: #2e7d32; background: #f1f8e9; }
+    .dl-btn svg { display: block; }
+
     .version-badge {
       display: inline-flex; align-items: center; justify-content: center;
       background: var(--bg);
@@ -542,9 +557,10 @@
 <!-- Header -->
 <header>
   <div class="header-icon">
-    <svg viewBox="0 0 24 24"><path d="M6 2a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6H6zm7 1.5L18.5 9H13V3.5zM8 13h8v1H8v-1zm0 3h8v1H8v-1zm0-6h4v1H8v-1z"/></svg>
+    <img src="https://media.licdn.com/dms/image/v2/D4E0BAQFkh3KHnkwrxA/company-logo_200_200/company-logo_200_200/0/1695102076020/schmees_lhn_holz_und_stahlingenieurbau_logo?e=2147483647&v=beta&t=bPWGeKm0FMe6DWDhjaSIWMlMjxCJ9nid-cXjAb3E6Tg"
+         alt="S&L Logo" style="width:28px;height:28px;object-fit:contain;border-radius:4px;" />
   </div>
-  <h1>Versionsinfo</h1>
+  <h1>S&amp;L Explorer</h1>
   <div class="project-badge" id="projectBadge">Verbinde...</div>
 </header>
 
@@ -632,6 +648,7 @@
         <th onclick="sortTable('path')" id="th-path">
           Pfad <span class="sort-icon">↕</span>
         </th>
+        <th style="text-align:center;width:60px">DL</th>
       </tr>
     </thead>
     <tbody id="tableBody"></tbody>
@@ -661,7 +678,7 @@
     <div class="dot" id="statusDot"></div>
     <span id="statusText">Initialisierung…</span>
   </div>
-  <span>Trimble Connect · Versionsinfo Extension</span>
+  <span>Trimble Connect · S&amp;L Explorer</span>
 </footer>
 
 <script>
@@ -720,7 +737,7 @@ async function discoverApiBase() {
     if (!originUrls.includes(u)) originUrls.push(u);
   }
 
-  console.log('[Versionsinfo] Trying regions:', originUrls);
+  console.log('[S&L Explorer] Trying regions:', originUrls);
 
   // Step 3: probe each with the project ID
   const errors = [];
@@ -729,7 +746,7 @@ async function discoverApiBase() {
       const res = await fetch(`${base}/projects/${projectId}`, {
         headers: { Authorization: `Bearer ${accessToken}` }
       });
-      console.log(`[Versionsinfo] ${base} → ${res.status}`);
+      console.log(`[S&L Explorer] ${base} → ${res.status}`);
       if (res.ok) return base;
       if (res.status === 401) {
         throw new Error('Zugriffstoken abgelaufen oder ungültig (401). Bitte die Extension neu laden.');
@@ -785,8 +802,9 @@ async function collectFiles(folderId, folderPath, depth = 0) {
       items = items.concat(sub);
     }
     for (const file of files) {
-      // "path" field is returned directly by Trimble API (confirmed)
-      file._path = file.path || folderPath || '/';
+      // folderPath aus Traversierung ist korrekt lesbar (z.B. "/Pläne/Ausführung")
+      // file.path aus der API enthält einen internen API-Pfad → nicht verwenden
+      file._path = folderPath || '/';
       items.push(file);
     }
 
@@ -804,14 +822,48 @@ async function collectFiles(folderId, folderPath, depth = 0) {
 function getFileId(f) {
   const id = f.id || f.versionId || f.identifier || null;
   if (!id && !window._fileIdWarnLogged) {
-    console.warn('[Versionsinfo] Kein fileId! Felder:', Object.keys(f).join(', '));
+    console.warn('[S&L Explorer] Kein fileId! Felder:', Object.keys(f).join(', '));
     window._fileIdWarnLogged = true;
   }
   return id;
 }
 
 /**
- * Holt die persistente File-ID (ändert sich nicht zwischen Versionen).
+ * Direkter Download einer Datei via Trimble API.
+ * GET /files/{versionId}/download → Redirect zur Download-URL
+ */
+async function downloadFile(idx, explicitVersionId) {
+  const f = allFiles[idx];
+  if (!f) return;
+  const versionId = explicitVersionId || f.versionId || f.id;
+  if (!versionId) { alert('Keine Datei-ID für Download verfügbar.'); return; }
+
+  try {
+    // Hole Download-URL vom API (gibt 302 redirect oder {url: "..."} zurück)
+    const data = await tcGet(`/files/${versionId}/download`);
+    const dlUrl = typeof data === 'string' ? data : (data.url || data.downloadUrl || data.link || null);
+    if (dlUrl) {
+      const a = document.createElement('a');
+      a.href = dlUrl;
+      a.download = f.name || 'download';
+      a.target = '_blank';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } else {
+      // Fallback: direkte API-URL mit Token im Header ist nicht möglich per <a>,
+      // daher öffnen wir die Download-URL als neuen Tab
+      const fallbackUrl = `${tcApiBase}/files/${versionId}/download`;
+      window.open(fallbackUrl, '_blank');
+    }
+  } catch (err) {
+    console.error('[S&L Explorer] Download-Fehler:', err);
+    // Fallback: API-URL direkt öffnen
+    window.open(`${tcApiBase}/files/${versionId}/download`, '_blank');
+  }
+}
+
+ (ändert sich nicht zwischen Versionen).
  * f.id === f.versionId (aktuelle Version-ID).
  * Trimble's Viewer braucht: ?id={persistenteFileId}&version={versionId}
  * Die persistente ID kommt aus GET /files/{versionId} → Feld "parentId" (wenn parentType=FILE)
@@ -825,8 +877,8 @@ async function getPersistentFileId(versionId) {
     const data = await tcGet(`/files/${versionId}`);
     // Log once to see the structure
     if (!window._fileDetailLogged) {
-      console.log('[Versionsinfo] GET /files/{id} keys:', Object.keys(data).join(', '));
-      console.log('[Versionsinfo] GET /files/{id}:', JSON.stringify(data).slice(0, 400));
+      console.log('[S&L Explorer] GET /files/{id} keys:', Object.keys(data).join(', '));
+      console.log('[S&L Explorer] GET /files/{id}:', JSON.stringify(data).slice(0, 400));
       window._fileDetailLogged = true;
     }
     // If the file has a parentType=FILE, the parentId is the persistent file container ID
@@ -865,7 +917,7 @@ async function openFile(idx, explicitVersionId) {
     // Fallback: nur versionId (öffnet leider "Keine Vorschau")
     url = `https://web.connect.trimble.com/projects/${projectId}/viewer/2D?id=${versionId}&version=${versionId}&type=revisions&etag=${versionId}`;
   }
-  console.log('[Versionsinfo] Öffne:', f.name, '| persistentId:', persistentId, '| versionId:', versionId);
+  console.log('[S&L Explorer] Öffne:', f.name, '| persistentId:', persistentId, '| versionId:', versionId);
   window.open(url, '_blank');
 }
 
@@ -917,7 +969,7 @@ async function loadFiles() {
         `Root-Ordner nicht gefunden. Verfügbare Felder: ${Object.keys(project).join(', ')}`
       );
     }
-    console.log('[Versionsinfo] rootFolderId:', rootFolderId);
+    console.log('[S&L Explorer] rootFolderId:', rootFolderId);
     setProgress(20);
 
     setLoadingMsg('Durchsuche Ordnerstruktur…');
@@ -1073,6 +1125,13 @@ function renderTable() {
         </span>
       </td>
       <td class="path-cell" title="${escHtml(path)}">${escHtml(path || '/')}</td>
+      <td style="text-align:center;vertical-align:middle">
+        <button class="dl-btn"
+                ${hasId ? `onclick="downloadFile(${idx})"` : 'disabled style="opacity:.3;cursor:default"'}
+                title="Datei herunterladen">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M5 20h14v-2H5v2zm7-14v8.17l-2.59-2.58L8 13l4 4 4-4-1.41-1.41L13 14.17V6h-1z"/></svg>
+        </button>
+      </td>
     `;
     tbody.appendChild(tr);
   }
@@ -1251,10 +1310,15 @@ async function openVersionModal(idx, fileName) {
           <td class="user-cell" style="font-size:12px">${escHtml(createdBy)}</td>
           <td style="font-size:11px;color:var(--muted);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(comment)}">${escHtml(comment) || '–'}</td>
           <td style="font-family:var(--font);font-size:11px;color:var(--muted)">${size}</td>
-          <td style="text-align:center">
-            <button class="ver-open-btn" onclick="openFile(${idx},'${vId}')" title="Diese Version öffnen">
+          <td style="text-align:center;white-space:nowrap;display:flex;gap:4px;justify-content:center">
+            <button class="ver-open-btn" onclick="openFile(${idx},'${vId}')" title="Diese Version im Viewer öffnen">
               <svg viewBox="0 0 24 24"><path d="M19 19H5V5h7V3H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/></svg>
               Öffnen
+            </button>
+            <button class="ver-open-btn" onclick="downloadFile(${idx},'${vId}')" title="Diese Version herunterladen"
+                    style="border-color:var(--border);color:#2e7d32">
+              <svg viewBox="0 0 24 24" width="10" height="10" fill="currentColor"><path d="M5 20h14v-2H5v2zm7-14v8.17l-2.59-2.58L8 13l4 4 4-4-1.41-1.41L13 14.17V6h-1z"/></svg>
+              DL
             </button>
           </td>
         </tr>`;
@@ -1269,7 +1333,7 @@ async function openVersionModal(idx, fileName) {
             <th>Erstellt von</th>
             <th>Kommentar</th>
             <th>Größe</th>
-            <th>Aktion</th>
+            <th>Öffnen / DL</th>
           </tr>
         </thead>
         <tbody>${rows}</tbody>
@@ -1350,9 +1414,9 @@ function escHtml(str) {
 
     // Set navigation menu
     await API.ui.setMenu({
-      title: 'Versionsinfo',
-      icon: 'https://cdn-icons-png.flaticon.com/512/337/337946.png',
-      command: 'versionsinfo_main'
+      title: 'S&L Explorer',
+      icon: 'https://media.licdn.com/dms/image/v2/D4E0BAQFkh3KHnkwrxA/company-logo_200_200/company-logo_200_200/0/1695102076020/schmees_lhn_holz_und_stahlingenieurbau_logo?e=2147483647&v=beta&t=bPWGeKm0FMe6DWDhjaSIWMlMjxCJ9nid-cXjAb3E6Tg',
+      command: 'sl_explorer_main'
     });
 
     // Get project info from Workspace API
@@ -1367,7 +1431,7 @@ function escHtml(str) {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[Versionsinfo] v8 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S&L Explorer] v9 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
