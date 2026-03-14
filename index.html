@@ -1128,8 +1128,7 @@ async function openPreview(idx) {
     if (thumb) {
       previewBaseUrl = thumb;
 
-      // Fetch with auth header → Blob URL (bypasses CORS/auth on <img src>)
-      // Also try requesting a larger resolution via size param
+      // Fetch with auth header → Blob URL
       let blobUrl = null;
       for (const url of [thumb + '?size=2048', thumb + '?width=2048', thumb]) {
         try {
@@ -1142,14 +1141,31 @@ async function openPreview(idx) {
         } catch (_) {}
       }
 
+      if (!blobUrl) { blobUrl = thumb; }
+
+      // Use canvas for high-quality upscaling (better than browser default)
       body.innerHTML = `<div class="preview-iframe-wrap" id="previewIframeWrap">
-        <img id="previewIframe" src="${blobUrl || thumb}"
-             style="display:block;width:100%;height:auto"
-             alt="Vorschau" />
+        <canvas id="previewIframe" style="display:block;width:100%;height:auto"></canvas>
       </div>`;
       document.getElementById('zoomToolbar').style.display = 'flex';
       currentZoom = 1.0;
-      setTimeout(() => applyZoom(1.0), 50);
+
+      // Load into canvas with 2× upscale using createImageBitmap for crispness
+      const canvas = document.getElementById('previewIframe');
+      const img2 = new Image();
+      img2.onload = () => {
+        // Draw at 2× native resolution on canvas (anti-aliased upscale)
+        const scale = 2;
+        canvas.width  = img2.naturalWidth  * scale;
+        canvas.height = img2.naturalHeight * scale;
+        const ctx = canvas.getContext('2d');
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img2, 0, 0, canvas.width, canvas.height);
+        setTimeout(() => applyZoom(1.0), 30);
+      };
+      img2.src = blobUrl;
+
     } else {
       previewBaseUrl = null;
       body.innerHTML = `<div class="preview-placeholder">
@@ -1202,15 +1218,14 @@ let previewBaseUrl = null; // base URL without fragment
 function applyZoom(z) {
   currentZoom = Math.min(3, Math.max(0.3, parseFloat(z.toFixed(2))));
 
-  const wrap   = document.getElementById('previewIframeWrap');
-  const img    = document.getElementById('previewIframe');
-  if (wrap && img && img.tagName === 'IMG') {
-    // Scale image by adjusting width — browser re-renders at new size (sharp)
-    // overflow:auto on wrap provides scrollbars when zoomed in
-    wrap.style.overflow = 'auto';
+  const wrap = document.getElementById('previewIframeWrap');
+  const el   = document.getElementById('previewIframe');
+  if (wrap && el) {
+    wrap.style.overflow   = 'auto';
     wrap.style.alignItems = 'flex-start';
-    img.style.width  = Math.round(currentZoom * 100) + '%';
-    img.style.height = 'auto';
+    // works for both <img> and <canvas>
+    el.style.width  = Math.round(currentZoom * 100) + '%';
+    el.style.height = 'auto';
   }
 
   const slider = document.getElementById('zoomSlider');
@@ -1810,7 +1825,7 @@ function escHtml(str) {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v17 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v18 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
