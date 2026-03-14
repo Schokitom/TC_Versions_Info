@@ -811,22 +811,61 @@ function getFileId(f) {
 }
 
 /**
- * Open a file in the Trimble 2D Viewer.
- * Confirmed: Trimble's modelId = file.versionId = file.id
+ * Holt die persistente File-ID (ändert sich nicht zwischen Versionen).
+ * f.id === f.versionId (aktuelle Version-ID).
+ * Trimble's Viewer braucht: ?id={persistenteFileId}&version={versionId}
+ * Die persistente ID kommt aus GET /files/{versionId} → Feld "parentId" (wenn parentType=FILE)
+ * oder aus GET /files/{versionId}/versions[0] → Feld "fileId" o.ä.
  */
-async function openFile(idx, versionId) {
+async function getPersistentFileId(versionId) {
+  // Cache
+  if (!window._fileIdCache) window._fileIdCache = {};
+  if (window._fileIdCache[versionId]) return window._fileIdCache[versionId];
+  try {
+    const data = await tcGet(`/files/${versionId}`);
+    // Log once to see the structure
+    if (!window._fileDetailLogged) {
+      console.log('[Versionsinfo] GET /files/{id} keys:', Object.keys(data).join(', '));
+      console.log('[Versionsinfo] GET /files/{id}:', JSON.stringify(data).slice(0, 400));
+      window._fileDetailLogged = true;
+    }
+    // If the file has a parentType=FILE, the parentId is the persistent file container ID
+    const pid = (data.parentType === 'FILE' ? data.parentId : null)
+      || data.fileId || data.entityId || data.persistentId || null;
+    window._fileIdCache[versionId] = pid;
+    return pid;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Öffnet eine Datei im Trimble 2D Viewer.
+ * Korrekte URL (aus Trimble Explorer ermittelt):
+ *   viewer/2D?id={persistenteFileId}&version={versionId}&type=revisions&etag={versionId}
+ */
+async function openFile(idx, explicitVersionId) {
   const f = allFiles[idx];
   if (!f) return;
-  const fileId = getFileId(f);
-  if (!fileId) {
+  const versionId = explicitVersionId || f.versionId || f.id;
+  if (!versionId) {
     alert(`Datei-ID nicht gefunden für "${f.name}".`);
     return;
   }
-  // In Trimble Connect: file.id === file.versionId (confirmed from API response)
-  // The 2D Viewer uses versionId as modelId
-  const modelId = versionId || f.versionId || fileId;
-  const url = `https://web.connect.trimble.com/projects/${projectId}/viewer/2d?modelId=${modelId}`;
-  console.log('[Versionsinfo] Öffne:', f.name, '| modelId:', modelId);
+
+  // Hole persistente File-ID (wird gecacht)
+  const persistentId = f._persistentFileId || await getPersistentFileId(versionId);
+  if (persistentId) f._persistentFileId = persistentId;
+
+  let url;
+  if (persistentId) {
+    // Korrekte URL mit persistenter ID + versionId
+    url = `https://web.connect.trimble.com/projects/${projectId}/viewer/2D?id=${persistentId}&version=${versionId}&type=revisions&etag=${versionId}`;
+  } else {
+    // Fallback: nur versionId (öffnet leider "Keine Vorschau")
+    url = `https://web.connect.trimble.com/projects/${projectId}/viewer/2D?id=${versionId}&version=${versionId}&type=revisions&etag=${versionId}`;
+  }
+  console.log('[Versionsinfo] Öffne:', f.name, '| persistentId:', persistentId, '| versionId:', versionId);
   window.open(url, '_blank');
 }
 
@@ -1204,9 +1243,7 @@ async function openVersionModal(idx, fileName) {
         : v.createdBy?.email || v.modifiedBy?.email || '–';
       const comment    = v.comment || v.description || '';
       const size       = v.size ? formatSize(v.size) : '–';
-      // modelId = versionId of the specific version
-      const viewerUrl  = `https://web.connect.trimble.com/projects/${projectId}/viewer/2d?modelId=${vId}`;
-
+      // Öffne diese spezifische Version über openFile (holt persistente ID automatisch)
       return `
         <tr>
           <td><span class="ver-num">v${versionNum}</span></td>
@@ -1215,7 +1252,7 @@ async function openVersionModal(idx, fileName) {
           <td style="font-size:11px;color:var(--muted);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(comment)}">${escHtml(comment) || '–'}</td>
           <td style="font-family:var(--font);font-size:11px;color:var(--muted)">${size}</td>
           <td style="text-align:center">
-            <button class="ver-open-btn" onclick="window.open('${escHtml(viewerUrl)}','_blank')" title="Diese Version öffnen">
+            <button class="ver-open-btn" onclick="openFile(${idx},'${vId}')" title="Diese Version öffnen">
               <svg viewBox="0 0 24 24"><path d="M19 19H5V5h7V3H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/></svg>
               Öffnen
             </button>
@@ -1330,7 +1367,7 @@ function escHtml(str) {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[Versionsinfo] v7 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[Versionsinfo] v8 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
