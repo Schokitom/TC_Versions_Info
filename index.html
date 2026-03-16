@@ -1122,12 +1122,13 @@ async function openPreview(idx) {
     const apiBase = tcApiBase.startsWith('http') ? tcApiBase : 'https:' + tcApiBase;
     const downloadApiUrl = `${apiBase}/files/${versionId}/download`;
 
-    // Token als Query-Parameter übergeben (Browser sendet keine Custom-Header cross-origin)
-    const proxyUrl = `${PROXY}/proxy?url=${encodeURIComponent(downloadApiUrl)}&token=${encodeURIComponent(accessToken)}`;
+    // Token als X-Token Header senden — JWT ist zu lang für Query-Parameter
+    const proxyUrl = `${PROXY}/proxy?url=${encodeURIComponent(downloadApiUrl)}`;
+    console.log('[S+L Explorer] Proxy-URL:', proxyUrl);
 
-    console.log('[S+L Explorer] Proxy-URL:', `${PROXY}/proxy?url=${encodeURIComponent(downloadApiUrl)}&token=***`);
-
-    const blobResp = await fetch(proxyUrl);
+    const blobResp = await fetch(proxyUrl, {
+      headers: { 'X-Token': accessToken }
+    });
 
     if (blobResp.ok) {
       const blob    = await blobResp.blob();
@@ -1852,7 +1853,7 @@ function escHtml(str) {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v20 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v21 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
