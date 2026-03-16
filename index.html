@@ -1122,12 +1122,12 @@ async function openPreview(idx) {
     const apiBase = tcApiBase.startsWith('http') ? tcApiBase : 'https:' + tcApiBase;
     const downloadApiUrl = `${apiBase}/files/${versionId}/download`;
 
-    // Token als X-Token Header senden — JWT ist zu lang für Query-Parameter
+    // Authorization Header senden — standard CORS Header, kein Preflight-Problem
     const proxyUrl = `${PROXY}/proxy?url=${encodeURIComponent(downloadApiUrl)}`;
     console.log('[S+L Explorer] Proxy-URL:', proxyUrl);
 
     const blobResp = await fetch(proxyUrl, {
-      headers: { 'X-Token': accessToken }
+      headers: { 'Authorization': `Bearer ${accessToken}` }
     });
 
     if (blobResp.ok) {
@@ -1853,7 +1853,7 @@ function escHtml(str) {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v22 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v23 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
