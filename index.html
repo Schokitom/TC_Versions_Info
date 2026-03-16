@@ -1114,76 +1114,101 @@ async function openPreview(idx) {
 
   const versionId = f.versionId || f.id;
 
-  try {
-    // Step 1: get persistent file ID (needed for viewer URL)
-    const persistentId = f._persistentFileId || await getPersistentFileId(versionId);
-    if (persistentId) f._persistentFileId = persistentId;
+  // Proxy-URL für scharfe PDF-Vorschau
+  const PROXY = 'https://sl-explorer-proxy.onrender.com';
 
-    // thumbnailUrl is an Array in Trimble API — pick the largest available
-    const thumbArr = Array.isArray(f.thumbnailUrl) ? f.thumbnailUrl : (f.thumbnailUrl ? [f.thumbnailUrl] : []);
-    const thumbUrls = thumbArr.map(t => (typeof t === 'string' ? t : (t.url || t.href || t.link || null))).filter(Boolean);
-    const thumb = thumbUrls[thumbUrls.length - 1] || null;
-    console.log('[S+L Explorer] thumbnailUrl resolved:', thumb);
+  try {
+    // Download-URL via Proxy holen — Proxy folgt dem 302-Redirect zu S3
+    // und gibt das echte PDF zurück (kein CORS-Problem mehr)
+    const downloadApiUrl = `${tcApiBase}/files/${versionId}/download`;
+    const proxyUrl = `${PROXY}/proxy?url=${encodeURIComponent(downloadApiUrl)}`;
+
+    body.innerHTML = `<div class="preview-iframe-wrap" id="previewIframeWrap">
+      <iframe id="previewIframe"
+              src="${proxyUrl}"
+              title="${escHtml(f.name)}"
+              style="display:block;width:100%;height:100%;border:none;background:#fff"
+              data-proxy-url="${proxyUrl}">
+      </iframe>
+    </div>`;
+
+    // Auth-Header kann nicht direkt an iframe übergeben werden —
+    // Proxy bekommt ihn als Custom-Header über ein fetch+Blob Workaround:
+    // Wir laden das PDF als Blob und zeigen es im iframe als blob:-URL
+    const blobResp = await fetch(proxyUrl, {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
+
+    if (blobResp.ok) {
+      const blob    = await blobResp.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      previewBaseUrl = blobUrl;
+
+      // Blob-URL in iframe setzen — echter PDF-Renderer des Browsers
+      const iframe = document.getElementById('previewIframe');
+      if (iframe) iframe.src = blobUrl;
+
+      document.getElementById('zoomToolbar').style.display = 'flex';
+      currentZoom = 1.0;
+      const slider = document.getElementById('zoomSlider');
+      const label  = document.getElementById('zoomLabel');
+      if (slider) slider.value = 1;
+      if (label)  label.textContent = '100%';
+      console.log('[S+L Explorer] PDF via Proxy geladen, Blob-URL erstellt');
+    } else {
+      throw new Error(`Proxy HTTP ${blobResp.status}`);
+    }
+
+  } catch (err) {
+    console.warn('[S+L Explorer] Proxy fehlgeschlagen, Fallback auf Thumbnail:', err.message);
+
+    // Fallback: Thumbnail mit Canvas-Upscaling
+    const thumbArr  = Array.isArray(f.thumbnailUrl) ? f.thumbnailUrl : (f.thumbnailUrl ? [f.thumbnailUrl] : []);
+    const thumbUrls = thumbArr.map(t => typeof t === 'string' ? t : (t.url || null)).filter(Boolean);
+    const thumb     = thumbUrls[thumbUrls.length - 1] || null;
 
     if (thumb) {
-      previewBaseUrl = thumb;
-
-      // Fetch with auth header → Blob URL
       let blobUrl = null;
-      for (const url of [thumb + '?size=2048', thumb + '?width=2048', thumb]) {
-        try {
-          const resp = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
-          if (resp.ok) {
-            blobUrl = URL.createObjectURL(await resp.blob());
-            console.log('[S+L Explorer] Thumbnail geladen via:', url);
-            break;
-          }
-        } catch (_) {}
-      }
+      try {
+        const resp = await fetch(thumb, { headers: { Authorization: `Bearer ${accessToken}` } });
+        if (resp.ok) blobUrl = URL.createObjectURL(await resp.blob());
+      } catch (_) {}
 
-      if (!blobUrl) { blobUrl = thumb; }
-
-      // Use canvas for high-quality upscaling (better than browser default)
+      previewBaseUrl = blobUrl || thumb;
       body.innerHTML = `<div class="preview-iframe-wrap" id="previewIframeWrap">
         <canvas id="previewIframe" style="display:block;width:100%;height:auto"></canvas>
       </div>`;
       document.getElementById('zoomToolbar').style.display = 'flex';
       currentZoom = 1.0;
 
-      // Load into canvas with 2× upscale using createImageBitmap for crispness
       const canvas = document.getElementById('previewIframe');
-      const img2 = new Image();
+      const img2   = new Image();
       img2.onload = () => {
-        // Draw at 2× native resolution on canvas (anti-aliased upscale)
-        const scale = 2;
-        canvas.width  = img2.naturalWidth  * scale;
-        canvas.height = img2.naturalHeight * scale;
+        canvas.width  = img2.naturalWidth  * 2;
+        canvas.height = img2.naturalHeight * 2;
         const ctx = canvas.getContext('2d');
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
         ctx.drawImage(img2, 0, 0, canvas.width, canvas.height);
         setTimeout(() => applyZoom(1.0), 30);
       };
-      img2.src = blobUrl;
-
+      img2.src = previewBaseUrl;
     } else {
-      previewBaseUrl = null;
       body.innerHTML = `<div class="preview-placeholder">
         <svg viewBox="0 0 24 24" width="48" height="48"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6zm-1 1.5L18.5 9H13V3.5zM8 13h8v1H8v-1zm0 3h8v1H8v-1zm0-6h4v1H8v-1z" fill="currentColor"/></svg>
         <div>Keine Vorschau verfügbar</div>
       </div>`;
     }
+  }
 
-    // Meta info
+  // Meta info (immer anzeigen)
+  try {
     const size    = f.size ? formatSize(f.size) : '–';
     const modAt   = formatDate(getModifiedAt(f));
     const modBy   = getModifiedBy(f);
     metaEl.innerHTML = `<div>Größe: <span>${size}</span></div><div>Geändert: <span>${modAt}</span></div><div>Von: <span>${escHtml(modBy)}</span></div>`;
     metaEl.style.display = 'flex';
-
-  } catch (err) {
-    body.innerHTML = `<div class="preview-placeholder"><div>Fehler: ${escHtml(err.message)}</div></div>`;
-  }
+  } catch (_) {}
 }
 
 function closePreview() {
@@ -1220,12 +1245,21 @@ function applyZoom(z) {
 
   const wrap = document.getElementById('previewIframeWrap');
   const el   = document.getElementById('previewIframe');
+
   if (wrap && el) {
-    wrap.style.overflow   = 'auto';
-    wrap.style.alignItems = 'flex-start';
-    // works for both <img> and <canvas>
-    el.style.width  = Math.round(currentZoom * 100) + '%';
-    el.style.height = 'auto';
+    if (el.tagName === 'IFRAME') {
+      // PDF in iframe: reload with #zoom= fragment for crisp rendering
+      if (previewBaseUrl) {
+        const pct = Math.round(currentZoom * 100);
+        el.src = `${previewBaseUrl}#zoom=${pct}`;
+      }
+    } else {
+      // canvas or img: scale via width%
+      wrap.style.overflow   = 'auto';
+      wrap.style.alignItems = 'flex-start';
+      el.style.width  = Math.round(currentZoom * 100) + '%';
+      el.style.height = 'auto';
+    }
   }
 
   const slider = document.getElementById('zoomSlider');
@@ -1825,7 +1859,7 @@ function escHtml(str) {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v18 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v19 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
