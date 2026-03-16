@@ -1118,35 +1118,28 @@ async function openPreview(idx) {
   const PROXY = 'https://sl-explorer-proxy.onrender.com';
 
   try {
-    // Download-URL via Proxy holen — Proxy folgt dem 302-Redirect zu S3
-    // und gibt das echte PDF zurück (kein CORS-Problem mehr)
-    const downloadApiUrl = `${tcApiBase}/files/${versionId}/download`;
-    const proxyUrl = `${PROXY}/proxy?url=${encodeURIComponent(downloadApiUrl)}`;
+    // Stelle sicher dass die API-URL absolut mit https:// beginnt
+    const apiBase = tcApiBase.startsWith('http') ? tcApiBase : 'https:' + tcApiBase;
+    const downloadApiUrl = `${apiBase}/files/${versionId}/download`;
 
-    body.innerHTML = `<div class="preview-iframe-wrap" id="previewIframeWrap">
-      <iframe id="previewIframe"
-              src="${proxyUrl}"
-              title="${escHtml(f.name)}"
-              style="display:block;width:100%;height:100%;border:none;background:#fff"
-              data-proxy-url="${proxyUrl}">
-      </iframe>
-    </div>`;
+    // Token als Query-Parameter übergeben (Browser sendet keine Custom-Header cross-origin)
+    const proxyUrl = `${PROXY}/proxy?url=${encodeURIComponent(downloadApiUrl)}&token=${encodeURIComponent(accessToken)}`;
 
-    // Auth-Header kann nicht direkt an iframe übergeben werden —
-    // Proxy bekommt ihn als Custom-Header über ein fetch+Blob Workaround:
-    // Wir laden das PDF als Blob und zeigen es im iframe als blob:-URL
-    const blobResp = await fetch(proxyUrl, {
-      headers: { Authorization: `Bearer ${accessToken}` }
-    });
+    console.log('[S+L Explorer] Proxy-URL:', `${PROXY}/proxy?url=${encodeURIComponent(downloadApiUrl)}&token=***`);
+
+    const blobResp = await fetch(proxyUrl);
 
     if (blobResp.ok) {
       const blob    = await blobResp.blob();
       const blobUrl = URL.createObjectURL(blob);
       previewBaseUrl = blobUrl;
 
-      // Blob-URL in iframe setzen — echter PDF-Renderer des Browsers
-      const iframe = document.getElementById('previewIframe');
-      if (iframe) iframe.src = blobUrl;
+      body.innerHTML = `<div class="preview-iframe-wrap" id="previewIframeWrap">
+        <iframe id="previewIframe"
+                src="${blobUrl}#zoom=100"
+                style="display:block;width:100%;height:100%;border:none;background:#fff">
+        </iframe>
+      </div>`;
 
       document.getElementById('zoomToolbar').style.display = 'flex';
       currentZoom = 1.0;
@@ -1154,7 +1147,7 @@ async function openPreview(idx) {
       const label  = document.getElementById('zoomLabel');
       if (slider) slider.value = 1;
       if (label)  label.textContent = '100%';
-      console.log('[S+L Explorer] PDF via Proxy geladen, Blob-URL erstellt');
+      console.log('[S+L Explorer] PDF via Proxy erfolgreich geladen');
     } else {
       throw new Error(`Proxy HTTP ${blobResp.status}`);
     }
@@ -1859,7 +1852,7 @@ function escHtml(str) {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v19 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v20 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
