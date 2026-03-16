@@ -1118,46 +1118,25 @@ async function openPreview(idx) {
   const PROXY = 'https://slproxy.schoknechtthomas.workers.dev';
 
   try {
-    const apiBase = tcApiBase.startsWith('http') ? tcApiBase : 'https:' + tcApiBase;
+    // tcGet nutzt den Trimble Workspace API Proxy — kein CORS Problem
+    // Derselbe Weg wie downloadFile(), nur dass wir die URL für den iframe nutzen
+    console.log('[S+L Explorer] Hole Download-URL via tcGet für:', versionId);
+    const data = await tcGet(`/files/${versionId}/download`);
+    const dlUrl = typeof data === 'string' ? data
+      : (data.url || data.downloadUrl || data.link || data.href || null);
 
-    // Hole persistente File-ID — Trimble /download braucht möglicherweise parentId
-    const persistentId = f._persistentFileId || await getPersistentFileId(versionId);
-    if (persistentId) f._persistentFileId = persistentId;
+    console.log('[S+L Explorer] Download-URL erhalten:', dlUrl ? dlUrl.substring(0, 80) + '...' : 'null');
 
-    // Versuche Download mit persistenter ID zuerst, dann mit versionId
-    const idsToTry = [];
-    if (persistentId && persistentId !== versionId) idsToTry.push(persistentId);
-    idsToTry.push(versionId);
+    if (!dlUrl) throw new Error('Keine Download-URL in API-Antwort');
 
-    let blobUrl = null;
-    let lastErr  = '';
+    // PDF als Blob laden (URL ist pre-signed S3, kein Auth nötig)
+    const resp = await fetch(dlUrl);
+    if (!resp.ok) throw new Error(`S3 fetch HTTP ${resp.status}`);
 
-    for (const fileId of idsToTry) {
-      const downloadApiUrl = `${apiBase}/files/${fileId}/download`;
-      const proxyUrl = `${PROXY}/proxy?url=${encodeURIComponent(downloadApiUrl)}`;
-      console.log('[S+L Explorer] Versuche Download mit ID:', fileId);
-
-      const resp = await fetch(proxyUrl, {
-        headers: { 'Authorization': `Bearer ${accessToken}` }
-      });
-      console.log('[S+L Explorer] Proxy Response:', resp.status, '| ID:', fileId);
-
-      if (resp.ok) {
-        const blob = await resp.blob();
-        blobUrl = URL.createObjectURL(blob);
-        console.log('[S+L Explorer] PDF erfolgreich geladen mit ID:', fileId);
-        break;
-      } else {
-        let body = '';
-        try { body = await resp.text(); } catch(_) {}
-        lastErr = `HTTP ${resp.status}: ${body}`;
-        console.warn('[S+L Explorer] Fehlgeschlagen:', lastErr);
-      }
-    }
-
-    if (!blobUrl) throw new Error(lastErr || 'Alle IDs fehlgeschlagen');
-
+    const blob    = await resp.blob();
+    const blobUrl = URL.createObjectURL(blob);
     previewBaseUrl = blobUrl;
+    console.log('[S+L Explorer] PDF erfolgreich als Blob geladen');
 
     body.innerHTML = `<div class="preview-iframe-wrap" id="previewIframeWrap">
       <iframe id="previewIframe"
@@ -1874,7 +1853,7 @@ function escHtml(str) {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v25 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v26 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
