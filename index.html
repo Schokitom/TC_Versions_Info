@@ -1115,7 +1115,7 @@ async function openPreview(idx) {
   const versionId = f.versionId || f.id;
 
   // Proxy-URL für scharfe PDF-Vorschau
-  const PROXY = 'https://sl-explorer-proxy.onrender.com';
+  const PROXY = 'https://slproxy.schoknechtthomas.workers.dev';
 
   try {
     // Stelle sicher dass die API-URL absolut mit https:// beginnt
@@ -1853,7 +1853,7 @@ function escHtml(str) {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v21 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v22 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
