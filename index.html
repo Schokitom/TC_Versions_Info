@@ -2595,6 +2595,7 @@ async function buildAndDownloadZip(files, zipName, progBar, progLbl) {
   const zip   = new JSZip();
   let done    = 0;
   let added   = 0;
+  let firstFailDiagnosed = false;
 
   for (const f of files) {
     const fid  = getFileId(f);
@@ -2625,7 +2626,30 @@ async function buildAndDownloadZip(files, zipName, progBar, progLbl) {
         }
       } else {
         const errText = await res.text().catch(() => '');
-        console.warn(`[S+L Explorer] ZIP: Worker ${res.status} für ${name} | ${errText.slice(0,200)}`);
+        console.warn(`[S+L Explorer] ZIP: Worker ${res.status} für ${name} | ${errText.slice(0,300)}`);
+
+        // Erste fehlgeschlagene Datei: Diagnose-Request senden
+        if (!firstFailDiagnosed) {
+          firstFailDiagnosed = true;
+          console.log('[S+L Explorer] Sende Diagnose-Request für erste fehlgeschlagene Datei…');
+          try {
+            const diagRes = await fetch(PROXY, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                token:    accessToken,
+                fileId:   fid,
+                apiBase:  tcApiBase,
+                fileName: name,
+                diagnose: true
+              })
+            });
+            const diagData = await diagRes.json();
+            console.log('[S+L Explorer] DIAGNOSE-ERGEBNIS:', JSON.stringify(diagData, null, 2));
+          } catch (de) {
+            console.warn('[S+L Explorer] Diagnose fehlgeschlagen:', de.message);
+          }
+        }
       }
     } catch (e) {
       console.warn(`[S+L Explorer] ZIP: fetch-Fehler für ${name} | ${e.message}`);
@@ -2636,7 +2660,7 @@ async function buildAndDownloadZip(files, zipName, progBar, progLbl) {
   }
 
   if (added === 0) {
-    alert(`ZIP konnte nicht erstellt werden — keine Dateien konnten heruntergeladen werden.\n\nBitte F12 → Konsole für Details prüfen.`);
+    alert(`ZIP konnte nicht erstellt werden — keine Dateien konnten heruntergeladen werden.\n\nBitte F12 → Konsole für Details prüfen (DIAGNOSE-ERGEBNIS).`);
     return;
   }
 
@@ -2814,7 +2838,7 @@ async function downloadCheckedFolders() {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v59 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v60 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
