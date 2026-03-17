@@ -275,6 +275,17 @@
     .table-wrap::-webkit-scrollbar-track { background: transparent; }
     .table-wrap::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 
+    /* Aktionsspalte immer sichtbar — sticky rechts */
+    th.actions-th,
+    td.actions-td {
+      position: sticky;
+      right: 0;
+      background: var(--surface);
+      z-index: 2;
+      box-shadow: -3px 0 6px rgba(0,0,0,.25);
+    }
+    tbody tr:hover td.actions-td { background: var(--row-hover); }
+
     /* ── Preview panel ── */
     .preview-panel {
       width: 0;
@@ -987,7 +998,7 @@
         <th onclick="sortTable('path')" id="th-path">
           Pfad <span class="sort-icon">↕</span>
         </th>
-        <th style="text-align:center;width:80px">Aktionen</th>
+        <th class="actions-th" style="text-align:center;width:80px">Aktionen</th>
       </tr>
     </thead>
     <tbody id="tableBody"></tbody>
@@ -1883,7 +1894,7 @@ function renderTable() {
         </span>
       </td>
       <td class="path-cell" title="${escHtml(path)}">${escHtml(path || '/')}</td>
-      <td style="text-align:center;vertical-align:middle;white-space:nowrap">
+      <td class="actions-td" style="text-align:center;vertical-align:middle;white-space:nowrap">
         <div style="display:inline-flex;gap:4px;align-items:center">
           <button class="prev-btn" id="prev-btn-${idx}"
                   ${hasId ? `onclick="openPreview(${idx})"` : 'disabled style="opacity:.3;cursor:default"'}
@@ -2060,7 +2071,7 @@ function renderSearchResults() {
         <span class="version-badge" ${verCall ? `onclick="${verCall}"` : ''} title="Versionen">${versions}</span>
       </td>
       <td class="path-cell" title="${escHtml(path)}">${escHtml(path || '/')}</td>
-      <td style="text-align:center;vertical-align:middle;white-space:nowrap">
+      <td class="actions-td" style="text-align:center;vertical-align:middle;white-space:nowrap">
         <div style="display:inline-flex;gap:4px;align-items:center">
           <button class="prev-btn" ${prevCall ? `id="prev-btn-${idx}"` : ''}
                   ${prevCall ? `onclick="${prevCall}"` : 'disabled style="opacity:.3;cursor:default"'}
@@ -2373,7 +2384,7 @@ function escHtml(str) {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v51 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v52 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
