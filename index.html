@@ -1955,7 +1955,7 @@ function renderTable() {
       </td>
       <td class="path-cell" title="${escHtml(path)}">
         <a class="path-link" href="#"
-           onclick="event.preventDefault(); openFolderInTrimble('${escHtml(f.parentId || rootFolderId)}')"
+           onclick="event.preventDefault(); openFolderInTrimble('${escHtml(f.parentId || rootFolderId)}','${encodeURIComponent(JSON.stringify(f.path||[]))}')"
            title="In Trimble Connect öffnen: ${escHtml(path)}">
           ${escHtml(path || '/')}
         </a>
@@ -2138,7 +2138,7 @@ function renderSearchResults() {
       </td>
       <td class="path-cell" title="${escHtml(path)}">
         <a class="path-link" href="#"
-           onclick="event.preventDefault(); openFolderInTrimble('${escHtml(f.parentId || rootFolderId)}')"
+           onclick="event.preventDefault(); openFolderInTrimble('${escHtml(f.parentId || rootFolderId)}','${encodeURIComponent(JSON.stringify(f.path||[]))}')"
            title="In Trimble Connect öffnen: ${escHtml(path)}">
           ${escHtml(path || '/')}
         </a>
@@ -2422,10 +2422,30 @@ function escHtml(str) {
 }
 
 // Öffnet einen Ordner direkt im Trimble Connect Browser-Explorer
-function openFolderInTrimble(folderId) {
-  if (!folderId || !projectId) return;
-  // Trimble Connect Browser-URL zum Ordner
-  const url = `https://web.connect.trimble.com/projects/${projectId}/explorer?folderId=${folderId}`;
+// folderId = parentId der Datei (aus API: f.parentId)
+// pathArr  = f.path Array aus der API (enthält Ordner-Hierarchie mit IDs)
+async function openFolderInTrimble(folderId, pathArr) {
+  if (!projectId) return;
+
+  // f.path Array aus API: [{id, versionId, name}, ...] — letztes Element = direkter Elternordner
+  // Wir nutzen die versionId des letzten Path-Elements als Ordner-ID
+  let targetFolderId = folderId;
+  try {
+    if (pathArr) {
+      const arr = JSON.parse(decodeURIComponent(pathArr));
+      if (Array.isArray(arr) && arr.length > 0) {
+        const last = arr[arr.length - 1];
+        targetFolderId = last.versionId || last.id || folderId;
+      }
+    }
+  } catch (_) {}
+
+  if (!targetFolderId) targetFolderId = rootFolderId;
+
+  // Trimble Connect Explorer URL mit Ordner-Navigation
+  // Die korrekte URL die Trimble intern nutzt:
+  const url = `https://web.connect.trimble.com/projects/${projectId}/explorer/${targetFolderId}`;
+  console.log('[S+L Explorer] Öffne Ordner:', targetFolderId, '→', url);
   window.open(url, '_blank');
 }
 
@@ -2544,7 +2564,7 @@ function openFolderInTrimble(folderId) {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v65 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v66 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
