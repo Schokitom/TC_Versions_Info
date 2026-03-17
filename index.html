@@ -695,6 +695,15 @@
       text-overflow: ellipsis;
       white-space: nowrap;
     }
+    .path-link {
+      color: var(--muted);
+      text-decoration: none;
+      transition: color .15s;
+    }
+    .path-link:hover {
+      color: var(--accent);
+      text-decoration: underline;
+    }
 
     /* ── Path Dropdown Filter ── */
     .path-filter-wrap {
@@ -910,82 +919,6 @@
     }
     .scope-toggle:hover { color: var(--text); }
 
-    /* ── Multi-Select & Bulk Download ── */
-    .select-all-th {
-      width: 36px;
-      padding: 10px 8px !important;
-      text-align: center !important;
-    }
-    .row-check-td {
-      width: 36px;
-      padding: 10px 8px !important;
-      text-align: center !important;
-    }
-    .row-checkbox, .select-all-check {
-      accent-color: var(--accent);
-      width: 14px; height: 14px;
-      cursor: pointer;
-    }
-    .bulk-bar {
-      display: none;
-      align-items: center;
-      gap: 10px;
-      padding: 6px 20px;
-      background: rgba(0,194,255,.06);
-      border-bottom: 1px solid var(--accent2);
-      flex-shrink: 0;
-      font-size: 12px;
-      color: var(--text);
-    }
-    .bulk-bar.visible { display: flex; }
-    .bulk-count { color: var(--accent); font-weight: 600; }
-    .bulk-dl-btn {
-      display: flex; align-items: center; gap: 6px;
-      background: var(--accent2);
-      border: 1px solid var(--accent);
-      border-radius: 6px;
-      padding: 5px 12px;
-      font-size: 12px;
-      font-family: var(--font-ui);
-      color: #fff;
-      cursor: pointer;
-      transition: all .15s;
-    }
-    .bulk-dl-btn:hover { background: var(--accent); }
-    .bulk-dl-btn svg { width: 13px; height: 13px; fill: currentColor; }
-    .bulk-dl-btn:disabled { opacity: .5; cursor: default; }
-    .bulk-clear-btn {
-      background: none; border: none; color: var(--muted);
-      cursor: pointer; font-size: 12px; font-family: var(--font-ui);
-      padding: 4px 8px; border-radius: 4px;
-    }
-    .bulk-clear-btn:hover { color: var(--text); background: var(--row-hover); }
-    .dl-progress-wrap {
-      flex: 1; height: 4px; background: var(--border);
-      border-radius: 2px; overflow: hidden; display: none;
-    }
-    .dl-progress-wrap.visible { display: block; }
-    .dl-progress-bar {
-      height: 100%;
-      background: linear-gradient(90deg, var(--accent2), var(--accent));
-      width: 0%; transition: width .2s;
-    }
-
-    /* ── Tree Download Button ── */
-    .tree-dl-btn {
-      display: flex; align-items: center; justify-content: center;
-      background: none;
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      padding: 3px 6px;
-      cursor: pointer;
-      color: var(--muted);
-      transition: all .15s;
-      flex-shrink: 0;
-    }
-    .tree-dl-btn:hover { border-color: var(--success); color: var(--success); }
-    .tree-dl-btn svg { width: 12px; height: 12px; fill: currentColor; }
-
   </style>
 </head>
 <body>
@@ -1043,15 +976,6 @@
   </button>
 </div>
 
-<!-- Bulk-Download-Leiste -->
-<div class="bulk-bar" id="bulkBar">
-  <span class="bulk-count"><span id="bulkCount">0</span> ausgewählt</span>
-  <button class="bulk-dl-btn" id="bulkDlBtn" onclick="openEmbeddedExplorerForDownload()">
-    <svg viewBox="0 0 24 24"><path d="M5 20h14v-2H5v2zm7-14v8.17l-2.59-2.58L8 13l4 4 4-4-1.41-1.41L13 14.17V6h-1z"/></svg>
-    Herunterladen
-  </button>
-  <button class="bulk-clear-btn" onclick="clearSelection()">✕ Auswahl aufheben</button>
-</div>
 <div class="state-overlay" id="stateLoading">
   <div class="spinner"></div>
   <div class="state-title">Lade PDF-Dateien…</div>
@@ -1083,9 +1007,6 @@
 <div class="tree-panel" id="treePanel">
   <div class="tree-header">
     <span class="tree-title">Ordner</span>
-    <button class="tree-dl-btn" id="treeDlBtn" onclick="downloadCheckedFolders()" title="Markierte Ordner herunterladen" style="display:none">
-      <svg viewBox="0 0 24 24"><path d="M5 20h14v-2H5v2zm7-14v8.17l-2.59-2.58L8 13l4 4 4-4-1.41-1.41L13 14.17V6h-1z"/></svg>
-    </button>
     <button class="tree-apply-btn" id="treeApplyBtn" onclick="applyFolderFilter()" title="Ausgewählte Ordner laden">
       <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
       Anwenden
@@ -1104,9 +1025,6 @@
   <table id="fileTable">
     <thead>
       <tr>
-        <th class="select-all-th">
-          <input type="checkbox" class="select-all-check" id="selectAllCheck" onchange="toggleSelectAll(this.checked)" title="Alle auswählen" />
-        </th>
         <th onclick="sortTable('name')" id="th-name">
           Name <span class="sort-icon">↕</span>
         </th>
@@ -1155,34 +1073,6 @@
 </div><!-- end content-split -->
 
 <!-- Version Modal -->
-<!-- Embedded Explorer Download Modal -->
-<div class="modal-overlay hidden" id="explorerModal">
-  <div class="modal" style="max-width:1100px;height:88vh;display:flex;flex-direction:column">
-    <div class="modal-header">
-      <div class="pdf-icon">
-        <svg viewBox="0 0 24 24" width="12" height="12" fill="#fff"><path d="M5 20h14v-2H5v2zm7-14v8.17l-2.59-2.58L8 13l4 4 4-4-1.41-1.41L13 14.17V6h-1z"/></svg>
-      </div>
-      <div class="modal-title" id="explorerModalTitle">Trimble Connect Explorer — Dateien herunterladen</div>
-      <button class="modal-close" onclick="closeExplorerModal()">✕</button>
-    </div>
-    <!-- Hinweisleiste mit Dateiliste -->
-    <div id="explorerHint" style="padding:8px 16px;background:rgba(0,194,255,.06);border-bottom:1px solid var(--border);font-size:11px;color:var(--muted);line-height:1.6;max-height:80px;overflow-y:auto">
-      Lade…
-    </div>
-    <!-- Explorer iframe -->
-    <div style="flex:1;overflow:hidden;position:relative">
-      <iframe id="explorerIframe" src="#" style="width:100%;height:100%;border:none;display:none"></iframe>
-      <div id="explorerLoading" style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:12px;color:var(--muted)">
-        <div class="spinner"></div>
-        <span>Lade Trimble Connect Explorer…</span>
-      </div>
-    </div>
-    <div style="padding:8px 16px;border-top:1px solid var(--border);font-size:11px;color:var(--muted);display:flex;align-items:center;gap:6px">
-      <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
-      Dateien im Explorer auswählen → Rechtsklick oder ⋮ Menü → <b>Download</b>
-    </div>
-  </div>
-</div>
 <div class="modal-overlay hidden" id="versionModal" onclick="closeVersionModal(event)">
   <div class="modal">
     <div class="modal-header">
@@ -1219,7 +1109,6 @@ let rootFolderId = null;
 let tcApiBase = null;
 let allFiles  = []; // aktuell angezeigte Dateien (wird durch Suche NICHT verändert)
 let baseFiles = []; // unveränderliche Kopie der per "Anwenden" geladenen Dateien
-let selectedFileIds = new Set(); // für Multi-Select Download
 let sortKey = 'name';
 let sortAsc = true;
 let selectedPaths = new Set(); // leeres Set = alle anzeigen
@@ -1813,7 +1702,6 @@ function updateApplyBtn() {
     btn.textContent = '';
     btn.innerHTML = `<svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg> ${n > 0 ? `${n} Ordner laden` : 'Alle laden'}`;
   }
-  updateTreeDlBtn();
 }
 
 async function applyFolderFilter() {
@@ -1865,7 +1753,6 @@ async function applyFolderFilter() {
     allFiles  = pdfFiles;
     baseFiles = [...pdfFiles]; // unveränderliche Kopie sichern
     selectedPaths.clear();
-    selectedFileIds.clear();
     setProgress(100);
     buildPathDropdown();
     renderTable();
@@ -2033,16 +1920,9 @@ function renderTable() {
     const idx      = allFiles.indexOf(f);
     const fileId   = getFileId(f);
     const hasId    = !!fileId;
-    const isChecked = fileId ? selectedFileIds.has(fileId) : false;
 
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td class="row-check-td">
-        <input type="checkbox" class="row-checkbox"
-               data-id="${escHtml(fileId || '')}"
-               ${isChecked ? 'checked' : ''}
-               onchange="toggleRowSelect(this)" />
-      </td>
       <td>
         <div class="name-cell">
           <div class="pdf-icon">PDF</div>
@@ -2073,7 +1953,13 @@ function renderTable() {
           ${versions}
         </span>
       </td>
-      <td class="path-cell" title="${escHtml(path)}">${escHtml(path || '/')}</td>
+      <td class="path-cell" title="${escHtml(path)}">
+        <a class="path-link" href="#"
+           onclick="event.preventDefault(); openFolderInTrimble('${escHtml(f.parentId || rootFolderId)}')"
+           title="In Trimble Connect öffnen: ${escHtml(path)}">
+          ${escHtml(path || '/')}
+        </a>
+      </td>
       <td class="actions-td" style="text-align:center;vertical-align:middle;white-space:nowrap">
         <div style="display:inline-flex;gap:4px;align-items:center">
           <button class="prev-btn" id="prev-btn-${idx}"
@@ -2228,14 +2114,7 @@ function renderSearchResults() {
     const verCall   = hasId && idx >= 0 ? `openVersionModal(${idx},'${escHtml(name)}')` : null;
 
     const tr = document.createElement('tr');
-    const isChecked = selectedFileIds.has(fileId || idx);
     tr.innerHTML = `
-      <td class="row-check-td">
-        <input type="checkbox" class="row-checkbox"
-               data-id="${fileId || ''}" data-idx="${idx}"
-               ${isChecked ? 'checked' : ''}
-               onchange="toggleRowSelect(this)" />
-      </td>
       <td>
         <div class="name-cell">
           <div class="pdf-icon">PDF</div>
@@ -2257,7 +2136,13 @@ function renderSearchResults() {
       <td class="versions-cell">
         <span class="version-badge" ${verCall ? `onclick="${verCall}"` : ''} title="Versionen">${versions}</span>
       </td>
-      <td class="path-cell" title="${escHtml(path)}">${escHtml(path || '/')}</td>
+      <td class="path-cell" title="${escHtml(path)}">
+        <a class="path-link" href="#"
+           onclick="event.preventDefault(); openFolderInTrimble('${escHtml(f.parentId || rootFolderId)}')"
+           title="In Trimble Connect öffnen: ${escHtml(path)}">
+          ${escHtml(path || '/')}
+        </a>
+      </td>
       <td class="actions-td" style="text-align:center;vertical-align:middle;white-space:nowrap">
         <div style="display:inline-flex;gap:4px;align-items:center">
           <button class="prev-btn" ${prevCall ? `id="prev-btn-${idx}"` : ''}
@@ -2315,7 +2200,6 @@ function renderPathOptions(paths, filter) {
   list.innerHTML = '';
   const filtered = filter ? paths.filter(p => p.toLowerCase().includes(filter.toLowerCase())) : paths;
   for (const path of filtered) {
-    const isChecked = selectedPaths.has(path);
     const div = document.createElement('div');
     div.className = 'path-option' + (isChecked ? ' checked' : '');
     div.title = path;
@@ -2536,212 +2420,17 @@ function escHtml(str) {
   return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+// Öffnet einen Ordner direkt im Trimble Connect Browser-Explorer
+function openFolderInTrimble(folderId) {
+  if (!folderId || !projectId) return;
+  // Trimble Connect Browser-URL zum Ordner
+  const url = `https://web.connect.trimble.com/projects/${projectId}/explorer?folderId=${folderId}`;
+  window.open(url, '_blank');
+}
+
 // ─────────────────────────────────────────
 //  Multi-Select & Bulk Download
 // ─────────────────────────────────────────
-function toggleRowSelect(cb) {
-  const id  = cb.dataset.id;
-  const idx = parseInt(cb.dataset.idx);
-  const key = id || idx;
-  if (cb.checked) selectedFileIds.add(key);
-  else            selectedFileIds.delete(key);
-  updateBulkBar();
-}
-
-function toggleSelectAll(checked) {
-  // Alle sichtbaren Zeilen (aktuell gerenderte Checkboxen)
-  document.querySelectorAll('.row-checkbox').forEach(cb => {
-    const key = cb.dataset.id || parseInt(cb.dataset.idx);
-    if (checked) selectedFileIds.add(key);
-    else         selectedFileIds.delete(key);
-    cb.checked = checked;
-  });
-  updateBulkBar();
-}
-
-function clearSelection() {
-  selectedFileIds.clear();
-  document.querySelectorAll('.row-checkbox').forEach(cb => cb.checked = false);
-  const all = document.getElementById('selectAllCheck');
-  if (all) all.checked = false;
-  updateBulkBar();
-}
-
-function updateBulkBar() {
-  const bar   = document.getElementById('bulkBar');
-  const count = document.getElementById('bulkCount');
-  const n     = selectedFileIds.size;
-  bar.classList.toggle('visible', n > 0);
-  if (count) count.textContent = n;
-  // Indeterminate state für select-all Checkbox
-  const allCheck = document.getElementById('selectAllCheck');
-  if (allCheck) {
-    const total   = document.querySelectorAll('.row-checkbox').length;
-    allCheck.indeterminate = n > 0 && n < total;
-    allCheck.checked       = total > 0 && n === total;
-  }
-}
-
-// ─────────────────────────────────────────
-//  Embedded Explorer Download
-// ─────────────────────────────────────────
-let explorerAPI = null;
-
-async function openEmbeddedExplorerForDownload() {
-  if (selectedFileIds.size === 0) return;
-
-  const pool = searchResultFiles ? [...searchResultFiles, ...allFiles] : [...allFiles];
-  const selectedFiles = [];
-  for (const key of selectedFileIds) {
-    const f = pool.find(x => getFileId(x) === key);
-    if (f) selectedFiles.push(f);
-  }
-  if (selectedFiles.length === 0) return;
-
-  // Ordner bestimmen: wenn alle Dateien im selben Ordner → direkt dorthin
-  const folderIds = [...new Set(selectedFiles.map(f => f.parentId || rootFolderId).filter(Boolean))];
-  const folderId  = folderIds.length === 1 ? folderIds[0] : rootFolderId;
-
-  _openExplorerModal(selectedFiles, folderId);
-}
-
-async function _openExplorerModal(selectedFiles, folderId) {
-  const modal   = document.getElementById('explorerModal');
-  const title   = document.getElementById('explorerModalTitle');
-  const iframe  = document.getElementById('explorerIframe');
-  const loading = document.getElementById('explorerLoading');
-  const hint    = document.getElementById('explorerHint');
-
-  // Dateinamen-Liste als Hinweis aufbauen
-  const names = selectedFiles.map(f => `• ${f.name || '–'}`).join('\n');
-  const multiFolder = [...new Set(selectedFiles.map(f => f.parentId || rootFolderId).filter(Boolean))].length > 1;
-
-  title.textContent = `Explorer — ${selectedFiles.length} Datei(en) herunterladen`;
-
-  // Hinweis-Text aktualisieren
-  if (hint) {
-    hint.innerHTML = multiFolder
-      ? `<b>Hinweis:</b> Die ausgewählten Dateien liegen in verschiedenen Ordnern. Der Explorer wird beim Root-Ordner geöffnet. Bitte die Dateien dort suchen und herunterladen.<br><br><b>Ausgewählte Dateien:</b><br>${selectedFiles.map(f => `<span style="color:var(--accent)">${escHtml(f.name||'')}</span>`).join('<br>')}`
-      : `Bitte im Explorer unten die gewünschten Dateien auswählen (✓) und den <b>Download-Button</b> klicken.<br><br><b>Zu downloaden:</b><br>${selectedFiles.map(f => `<span style="color:var(--accent)">${escHtml(f.name||'')}</span>`).join('<br>')}`;
-  }
-
-  modal.classList.remove('hidden');
-  iframe.style.display = 'none';
-  loading.style.display = 'flex';
-  loading.innerHTML = `<div class="spinner"></div><span>Lade Trimble Connect Explorer…</span>`;
-
-  const embedUrl = TrimbleConnectWorkspace.getConnectEmbedUrl();
-  iframe.src = embedUrl;
-
-  try {
-    explorerAPI = await TrimbleConnectWorkspace.connect(
-      iframe,
-      (event, args) => {
-        console.log('[S+L Explorer] ExplorerModal Event:', event, args);
-      },
-      15000
-    );
-
-    await explorerAPI.embed.setTokens({ accessToken });
-
-    // Explorer im richtigen Ordner öffnen, nur PDFs anzeigen
-    await explorerAPI.embed.initFileExplorer({
-      projectId,
-      folderId,
-      fileTypeFilter: ['pdf'],      // nur PDFs zeigen
-      enableAdd:          false,    // Upload/Erstellen ausblenden
-      enableUploadFiles:  false,
-      enableCreateFolder: false,
-      enableSelect:       true,     // Auswahl aktivieren
-      enableExplorerKebabMenu: true // Download-Menü erhalten
-    });
-
-    iframe.style.display = 'block';
-    loading.style.display = 'none';
-
-    console.log('[S+L Explorer] Embedded Explorer geladen | folderId:', folderId, '| Dateien:', selectedFiles.map(f=>f.name).join(', '));
-
-  } catch (err) {
-    console.error('[S+L Explorer] Embedded Explorer Fehler:', err);
-    loading.innerHTML = `<div style="color:var(--danger);text-align:center;padding:20px">
-      <div style="font-size:24px;margin-bottom:8px">⚠️</div>
-      <div>${escHtml(err.message)}</div>
-      <div style="margin-top:12px">
-        <a href="https://web.connect.trimble.com/projects/${projectId}" target="_blank"
-           style="color:var(--accent);font-size:12px">Trimble Connect direkt öffnen →</a>
-      </div>
-    </div>`;
-  }
-}
-
-function closeExplorerModal() {
-  const modal  = document.getElementById('explorerModal');
-  const iframe = document.getElementById('explorerIframe');
-  modal.classList.add('hidden');
-  // iframe src zurücksetzen um Verbindung zu trennen
-  iframe.src = '#';
-  iframe.style.display = 'none';
-  explorerAPI = null;
-  document.getElementById('explorerLoading').style.display = 'flex';
-  document.getElementById('explorerLoading').innerHTML = `<div class="spinner"></div><span>Lade Trimble Connect Explorer…</span>`;
-}
-
-
-// ─────────────────────────────────────────
-//  Ordner-Download aus Baumstruktur
-// ─────────────────────────────────────────
-function updateTreeDlBtn() {
-  const btn = document.getElementById('treeDlBtn');
-  if (btn) btn.style.display = checkedFolderIds.size > 0 ? 'flex' : 'none';
-}
-
-async function downloadCheckedFolders() {
-  if (checkedFolderIds.size === 0) return;
-
-  const firstId = [...checkedFolderIds][0];
-  const folderId = firstId;
-  const folderNames = [...checkedFolderIds]
-    .map(id => findNodeById(folderTree, id)?.name || id).join(', ').slice(0, 60);
-
-  // Fake-Dateiliste für Hinweis-Anzeige
-  const hint = { length: checkedFolderIds.size, map: () => [] };
-
-  const modal   = document.getElementById('explorerModal');
-  const title   = document.getElementById('explorerModalTitle');
-  const iframe  = document.getElementById('explorerIframe');
-  const loading = document.getElementById('explorerLoading');
-  const hintEl  = document.getElementById('explorerHint');
-
-  title.textContent = `Explorer — Ordner: ${folderNames}`;
-  if (hintEl) hintEl.innerHTML = `<b>Ordner:</b> ${escHtml(folderNames)}<br>Dateien im Explorer auswählen und herunterladen.`;
-  modal.classList.remove('hidden');
-  iframe.style.display = 'none';
-  loading.style.display = 'flex';
-  loading.innerHTML = `<div class="spinner"></div><span>Lade Trimble Connect Explorer…</span>`;
-
-  const embedUrl = TrimbleConnectWorkspace.getConnectEmbedUrl();
-  iframe.src = embedUrl;
-
-  try {
-    explorerAPI = await TrimbleConnectWorkspace.connect(iframe, () => {}, 15000);
-    await explorerAPI.embed.setTokens({ accessToken });
-    await explorerAPI.embed.initFileExplorer({
-      projectId,
-      folderId,
-      fileTypeFilter: ['pdf'],
-      enableAdd: false, enableUploadFiles: false, enableCreateFolder: false,
-      enableSelect: true, enableExplorerKebabMenu: true
-    });
-    iframe.style.display = 'block';
-    loading.style.display = 'none';
-  } catch (err) {
-    loading.innerHTML = `<div style="color:var(--danger);text-align:center;padding:20px">
-      ⚠️ ${escHtml(err.message)}</div>`;
-  }
-}
-
-
-
 
 // ─────────────────────────────────────────
 (function initResizeHandle() {
@@ -2854,7 +2543,7 @@ async function downloadCheckedFolders() {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v63 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v64 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
