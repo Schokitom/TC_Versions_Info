@@ -1229,6 +1229,17 @@ async function tcGet(path) {
   return res.json();
 }
 
+/** Lädt eine Ressource als ArrayBuffer (für PDF-Volltext-Suche) */
+async function tcGetBuffer(path) {
+  const res = await fetch(`${tcApiBase}${path}`, {
+    headers: { Authorization: `Bearer ${accessToken}` }
+  });
+  // /download gibt 302 zurück → Browser folgt automatisch bei fetch mit redirect:'follow'
+  if (res.ok) return res.arrayBuffer();
+  // Wenn CORS blockiert wird (z.B. nach Redirect auf S3), null zurückgeben
+  return null;
+}
+
 /** Recursively collect all files via GET /folders/{id}/items */
 async function collectFiles(folderId, folderPath, depth = 0) {
   if (depth > 25) return [];
@@ -2054,7 +2065,7 @@ function onFulltextInput() {
 async function startFulltextSearch() {
   const query = document.getElementById('fulltextInput').value.trim().toLowerCase();
   if (!query) return;
-  if (ftActive) { ftAbort = true; await new Promise(r => setTimeout(r, 150)); }
+  if (ftActive) { ftAbort = true; await new Promise(r => setTimeout(r, 200)); }
   if (!allFiles.length) return;
 
   if (typeof pdfjsLib === 'undefined') {
@@ -2062,90 +2073,71 @@ async function startFulltextSearch() {
     return;
   }
 
-  ftActive = true; ftAbort = false;
-  ftActive    = true;
-  ftResults   = new Map();
+  ftActive  = true;
+  ftAbort   = false;
+  ftResults = {};
 
-  const statusEl  = document.getElementById('ftStatus');
+  const statusEl   = document.getElementById('ftStatus');
   const progressEl = document.getElementById('ftProgress');
-  const barEl     = document.getElementById('ftProgressBar');
-  const clearBtn  = document.getElementById('ftClearBtn');
+  const barEl      = document.getElementById('ftProgressBar');
+  const clearBtn   = document.getElementById('ftClearBtn');
 
-  statusEl.className  = 'fulltext-status searching';
-  statusEl.textContent = `Durchsuche 0 / ${allFiles.length}…`;
+  statusEl.className   = 'fulltext-status searching';
   progressEl.style.display = 'block';
-  barEl.style.width = '0%';
+  barEl.style.width    = '0%';
   clearBtn.style.display = 'none';
 
-  // Nur aktuell sichtbare (nicht gefilterte) Dateien durchsuchen
+  // Nur aktuell sichtbare Dateien durchsuchen
   const filesToSearch = allFiles.filter(f => {
     if (selectedPaths.size > 0 && !selectedPaths.has(f._path || '/')) return false;
-    const nameQuery = (document.getElementById('searchInput')?.value || '').toLowerCase();
-    if (nameQuery) {
-      const name = (f.name || '').toLowerCase();
-      const path = (f._path || '').toLowerCase();
-      if (!name.includes(nameQuery) && !path.includes(nameQuery)) return false;
+    const nameQ = (document.getElementById('searchInput')?.value || '').toLowerCase();
+    if (nameQ) {
+      const n = (f.name || '').toLowerCase();
+      const p = (f._path || '').toLowerCase();
+      if (!n.includes(nameQ) && !p.includes(nameQ)) return false;
     }
     return true;
   });
 
-  statusEl.textContent = `Durchsuche 0 / ${filesToSearch.length}…`;
+  const total = filesToSearch.length;
+  statusEl.textContent = `Durchsuche 0 / ${total}…`;
 
-  for (let i = 0; i < filesToSearch.length; i++) {
+  for (let i = 0; i < total; i++) {
+    if (ftAbort) break;
     const f = filesToSearch[i];
+    const idx = allFiles.indexOf(f);
     const versionId = f.versionId || f.id;
 
+    statusEl.textContent = `Durchsuche ${i + 1} / ${total}: ${f.name.slice(0, 28)}…`;
+    barEl.style.width = Math.round((i / total) * 100) + '%';
+
     try {
-      // PDF als ArrayBuffer laden (mit Auth-Header)
-      const resp = await fetch(`${tcApiBase}/files/${versionId}/download`, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-        redirect: 'follow'
-      });
-
-      let pdfData = null;
-      if (resp.ok || resp.redirected) {
-        // Falls redirect → fetch final URL
-        const finalResp = resp.redirected
-          ? await fetch(resp.url)
-          : resp;
-        if (finalResp.ok) {
-          pdfData = await finalResp.arrayBuffer();
-        }
-      }
-
-      if (!pdfData) {
-        // Fallback: direkt mit Auth laden
-        const r2 = await fetch(`${tcApiBase}/files/${versionId}/download`, {
-          headers: { Authorization: `Bearer ${accessToken}` }
-        });
-        if (r2.ok) pdfData = await r2.arrayBuffer();
-      }
-
-      if (pdfData) {
-        const result = await extractTextFromPDF(pdfData, query);
-        if (result.found) {
-          ftResults.set(f.id || f.versionId, result);
-        }
+      // tcGetBuffer: fetch mit Auth-Header, liefert ArrayBuffer
+      const arrayBuffer = await tcGetBuffer(`/files/${versionId}/download`);
+      if (arrayBuffer) {
+        const result = await extractTextFromPDF(arrayBuffer, query);
+        ftResults[idx] = result.found
+          ? { count: result.pages.length, pages: result.pages.map(p => ({ page: p, count: 1 })) }
+          : null;
+      } else {
+        ftResults[idx] = null;
       }
     } catch (e) {
       console.warn('[S+L Explorer] Volltext-Fehler für', f.name, ':', e.message);
+      ftResults[idx] = null;
     }
-
-    const pct = Math.round(((i + 1) / filesToSearch.length) * 100);
-    barEl.style.width = pct + '%';
-    statusEl.textContent = `Durchsuche ${i + 1} / ${filesToSearch.length}…`;
   }
 
   ftActive = false;
-  const found = ftResults.size;
-  statusEl.className  = 'fulltext-status done';
-  statusEl.textContent = found > 0
-    ? `${found} Treffer in ${found} Datei${found !== 1 ? 'en' : ''}`
-    : 'Keine Treffer gefunden';
+  barEl.style.width = '100%';
+  const matchCount = Object.values(ftResults).filter(v => v && v.count > 0).length;
+  statusEl.className   = 'fulltext-status done';
+  statusEl.textContent = ftAbort
+    ? 'Abgebrochen'
+    : `${matchCount} von ${total} PDFs enthalten "${query}"`;
   clearBtn.style.display = 'flex';
-  progressEl.style.display = 'none';
-
-  renderTable(); // Tabelle mit Treffern neu aufbauen
+  setTimeout(() => { progressEl.style.display = 'none'; }, 800);
+  renderTable();
 }
 
 /**
@@ -2182,15 +2174,15 @@ async function extractTextFromPDF(arrayBuffer, query) {
 }
 
 function clearFulltextSearch() {
-  ftActive    = false;
-  ftResults   = new Map();
-  ftActive = false;
+  ftAbort   = true;
+  ftActive  = false;
+  ftResults = {};
   document.getElementById('fulltextInput').value = '';
-  document.getElementById('ftStatus').className  = 'fulltext-status';
-  document.getElementById('ftStatus').textContent = 'Enter drücken zum Suchen';
-  document.getElementById('ftClearBtn').style.display  = 'none';
-  document.getElementById('ftProgress').style.display  = 'none';
-  document.getElementById('ftProgressBar').style.width = '0%';
+  document.getElementById('ftStatus').className   = 'fulltext-status';
+  document.getElementById('ftStatus').textContent  = 'Enter drücken zum Suchen';
+  document.getElementById('ftClearBtn').style.display   = 'none';
+  document.getElementById('ftProgress').style.display   = 'none';
+  document.getElementById('ftProgressBar').style.width  = '0%';
   renderTable();
 }
 
@@ -2469,7 +2461,7 @@ function escHtml(str) {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v35 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v36 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
