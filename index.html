@@ -1157,15 +1157,19 @@
 <!-- Version Modal -->
 <!-- Embedded Explorer Download Modal -->
 <div class="modal-overlay hidden" id="explorerModal">
-  <div class="modal" style="max-width:960px;height:80vh;display:flex;flex-direction:column">
+  <div class="modal" style="max-width:1100px;height:88vh;display:flex;flex-direction:column">
     <div class="modal-header">
       <div class="pdf-icon">
-        <svg viewBox="0 0 24 24" width="12" height="12" fill="#fff"><path d="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2z"/></svg>
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="#fff"><path d="M5 20h14v-2H5v2zm7-14v8.17l-2.59-2.58L8 13l4 4 4-4-1.41-1.41L13 14.17V6h-1z"/></svg>
       </div>
       <div class="modal-title" id="explorerModalTitle">Trimble Connect Explorer — Dateien herunterladen</div>
-      <div style="font-size:11px;color:var(--muted);margin-right:8px">Dateien im Explorer auswählen und herunterladen</div>
       <button class="modal-close" onclick="closeExplorerModal()">✕</button>
     </div>
+    <!-- Hinweisleiste mit Dateiliste -->
+    <div id="explorerHint" style="padding:8px 16px;background:rgba(0,194,255,.06);border-bottom:1px solid var(--border);font-size:11px;color:var(--muted);line-height:1.6;max-height:80px;overflow-y:auto">
+      Lade…
+    </div>
+    <!-- Explorer iframe -->
     <div style="flex:1;overflow:hidden;position:relative">
       <iframe id="explorerIframe" src="#" style="width:100%;height:100%;border:none;display:none"></iframe>
       <div id="explorerLoading" style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:12px;color:var(--muted)">
@@ -1173,9 +1177,9 @@
         <span>Lade Trimble Connect Explorer…</span>
       </div>
     </div>
-    <div style="padding:10px 16px;border-top:1px solid var(--border);font-size:11px;color:var(--muted);display:flex;align-items:center;gap:8px">
-      <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
-      Der echte Trimble Connect Explorer wird hier eingebettet. Dateien dort auswählen und mit dem nativen Download-Button herunterladen.
+    <div style="padding:8px 16px;border-top:1px solid var(--border);font-size:11px;color:var(--muted);display:flex;align-items:center;gap:6px">
+      <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+      Dateien im Explorer auswählen → Rechtsklick oder ⋮ Menü → <b>Download</b>
     </div>
   </div>
 </div>
@@ -2586,35 +2590,49 @@ let explorerAPI = null;
 async function openEmbeddedExplorerForDownload() {
   if (selectedFileIds.size === 0) return;
 
-  // Bestimme den Ordner der ausgewählten Dateien
-  // Wenn alle in einem Ordner → direkt dorthin navigieren
   const pool = searchResultFiles ? [...searchResultFiles, ...allFiles] : [...allFiles];
   const selectedFiles = [];
   for (const key of selectedFileIds) {
     const f = pool.find(x => getFileId(x) === key);
     if (f) selectedFiles.push(f);
   }
+  if (selectedFiles.length === 0) return;
 
-  // Ordner-IDs der ausgewählten Dateien bestimmen
-  const folderIds = [...new Set(selectedFiles.map(f => f.parentId || f._folderId || rootFolderId))];
+  // Ordner bestimmen: wenn alle Dateien im selben Ordner → direkt dorthin
+  const folderIds = [...new Set(selectedFiles.map(f => f.parentId || rootFolderId).filter(Boolean))];
   const folderId  = folderIds.length === 1 ? folderIds[0] : rootFolderId;
 
-  // Modal öffnen
-  const modal = document.getElementById('explorerModal');
-  const title = document.getElementById('explorerModalTitle');
-  const iframe = document.getElementById('explorerIframe');
-  const loading = document.getElementById('explorerLoading');
+  _openExplorerModal(selectedFiles, folderId);
+}
 
-  title.textContent = `Trimble Connect Explorer — ${selectedFiles.length} Datei(en) ausgewählt`;
+async function _openExplorerModal(selectedFiles, folderId) {
+  const modal   = document.getElementById('explorerModal');
+  const title   = document.getElementById('explorerModalTitle');
+  const iframe  = document.getElementById('explorerIframe');
+  const loading = document.getElementById('explorerLoading');
+  const hint    = document.getElementById('explorerHint');
+
+  // Dateinamen-Liste als Hinweis aufbauen
+  const names = selectedFiles.map(f => `• ${f.name || '–'}`).join('\n');
+  const multiFolder = [...new Set(selectedFiles.map(f => f.parentId || rootFolderId).filter(Boolean))].length > 1;
+
+  title.textContent = `Explorer — ${selectedFiles.length} Datei(en) herunterladen`;
+
+  // Hinweis-Text aktualisieren
+  if (hint) {
+    hint.innerHTML = multiFolder
+      ? `<b>Hinweis:</b> Die ausgewählten Dateien liegen in verschiedenen Ordnern. Der Explorer wird beim Root-Ordner geöffnet. Bitte die Dateien dort suchen und herunterladen.<br><br><b>Ausgewählte Dateien:</b><br>${selectedFiles.map(f => `<span style="color:var(--accent)">${escHtml(f.name||'')}</span>`).join('<br>')}`
+      : `Bitte im Explorer unten die gewünschten Dateien auswählen (✓) und den <b>Download-Button</b> klicken.<br><br><b>Zu downloaden:</b><br>${selectedFiles.map(f => `<span style="color:var(--accent)">${escHtml(f.name||'')}</span>`).join('<br>')}`;
+  }
+
   modal.classList.remove('hidden');
   iframe.style.display = 'none';
   loading.style.display = 'flex';
+  loading.innerHTML = `<div class="spinner"></div><span>Lade Trimble Connect Explorer…</span>`;
 
-  // Iframe URL setzen
   const embedUrl = TrimbleConnectWorkspace.getConnectEmbedUrl();
   iframe.src = embedUrl;
 
-  // Workspace API an den iframe koppeln
   try {
     explorerAPI = await TrimbleConnectWorkspace.connect(
       iframe,
@@ -2624,30 +2642,33 @@ async function openEmbeddedExplorerForDownload() {
       15000
     );
 
-    // Token übergeben
     await explorerAPI.embed.setTokens({ accessToken });
 
-    // Zum richtigen Ordner navigieren
+    // Explorer im richtigen Ordner öffnen, nur PDFs anzeigen
     await explorerAPI.embed.initFileExplorer({
       projectId,
-      folderId
+      folderId,
+      fileTypeFilter: ['pdf'],      // nur PDFs zeigen
+      enableAdd:          false,    // Upload/Erstellen ausblenden
+      enableUploadFiles:  false,
+      enableCreateFolder: false,
+      enableSelect:       true,     // Auswahl aktivieren
+      enableExplorerKebabMenu: true // Download-Menü erhalten
     });
 
-    // Loading ausblenden, Explorer zeigen
     iframe.style.display = 'block';
     loading.style.display = 'none';
 
-    console.log('[S+L Explorer] Embedded Explorer geladen, Ordner:', folderId);
+    console.log('[S+L Explorer] Embedded Explorer geladen | folderId:', folderId, '| Dateien:', selectedFiles.map(f=>f.name).join(', '));
 
   } catch (err) {
     console.error('[S+L Explorer] Embedded Explorer Fehler:', err);
     loading.innerHTML = `<div style="color:var(--danger);text-align:center;padding:20px">
       <div style="font-size:24px;margin-bottom:8px">⚠️</div>
-      <div>Explorer konnte nicht geladen werden: ${escHtml(err.message)}</div>
-      <div style="margin-top:12px;font-size:11px;color:var(--muted)">
-        Bitte den Trimble Connect Explorer direkt öffnen:
+      <div>${escHtml(err.message)}</div>
+      <div style="margin-top:12px">
         <a href="https://web.connect.trimble.com/projects/${projectId}" target="_blank"
-           style="color:var(--accent)">web.connect.trimble.com</a>
+           style="color:var(--accent);font-size:12px">Trimble Connect direkt öffnen →</a>
       </div>
     </div>`;
   }
@@ -2677,20 +2698,22 @@ function updateTreeDlBtn() {
 async function downloadCheckedFolders() {
   if (checkedFolderIds.size === 0) return;
 
-  // Ersten markierten Ordner im embedded Explorer öffnen
-  const firstId   = [...checkedFolderIds][0];
-  const firstNode = findNodeById(folderTree, firstId);
-  const folderId  = firstId;
+  const firstId = [...checkedFolderIds][0];
+  const folderId = firstId;
+  const folderNames = [...checkedFolderIds]
+    .map(id => findNodeById(folderTree, id)?.name || id).join(', ').slice(0, 60);
+
+  // Fake-Dateiliste für Hinweis-Anzeige
+  const hint = { length: checkedFolderIds.size, map: () => [] };
 
   const modal   = document.getElementById('explorerModal');
   const title   = document.getElementById('explorerModalTitle');
   const iframe  = document.getElementById('explorerIframe');
   const loading = document.getElementById('explorerLoading');
+  const hintEl  = document.getElementById('explorerHint');
 
-  const folderNames = [...checkedFolderIds]
-    .map(id => findNodeById(folderTree, id)?.name || id)
-    .join(', ').slice(0, 60);
-  title.textContent = `Trimble Connect Explorer — ${folderNames}`;
+  title.textContent = `Explorer — Ordner: ${folderNames}`;
+  if (hintEl) hintEl.innerHTML = `<b>Ordner:</b> ${escHtml(folderNames)}<br>Dateien im Explorer auswählen und herunterladen.`;
   modal.classList.remove('hidden');
   iframe.style.display = 'none';
   loading.style.display = 'flex';
@@ -2702,13 +2725,18 @@ async function downloadCheckedFolders() {
   try {
     explorerAPI = await TrimbleConnectWorkspace.connect(iframe, () => {}, 15000);
     await explorerAPI.embed.setTokens({ accessToken });
-    await explorerAPI.embed.initFileExplorer({ projectId, folderId });
+    await explorerAPI.embed.initFileExplorer({
+      projectId,
+      folderId,
+      fileTypeFilter: ['pdf'],
+      enableAdd: false, enableUploadFiles: false, enableCreateFolder: false,
+      enableSelect: true, enableExplorerKebabMenu: true
+    });
     iframe.style.display = 'block';
     loading.style.display = 'none';
   } catch (err) {
     loading.innerHTML = `<div style="color:var(--danger);text-align:center;padding:20px">
-      ⚠️ Explorer konnte nicht geladen werden: ${escHtml(err.message)}
-    </div>`;
+      ⚠️ ${escHtml(err.message)}</div>`;
   }
 }
 
@@ -2826,7 +2854,7 @@ async function downloadCheckedFolders() {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v62 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v63 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
