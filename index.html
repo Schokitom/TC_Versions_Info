@@ -939,7 +939,7 @@
 </div>
 
 <!-- Toolbar (hidden until loaded) -->
-<div class="toolbar" id="toolbar" style="display:none">
+<div class="toolbar" id="toolbar">
   <div class="search-wrap">
     <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
     <input type="text" id="searchInput" placeholder="Dateiname suchen…" oninput="filterTable()" />
@@ -1757,7 +1757,6 @@ async function applyFolderFilter() {
     buildPathDropdown();
     renderTable();
     showState('table');
-    document.getElementById('toolbar').style.display = 'flex';
     document.getElementById('totalCount').textContent = allFiles.length;
     setStatus('ok', `${allFiles.length} PDF-Dateien geladen`);
   } catch (err) {
@@ -2087,7 +2086,6 @@ function renderSearchResults() {
   });
 
   showState('table');
-  document.getElementById('toolbar').style.display = 'flex';
 
   const tbody = document.getElementById('tableBody');
   tbody.innerHTML = '';
@@ -2564,7 +2562,7 @@ async function openFolderInTrimble(folderId, pathArr) {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v67 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v68 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
