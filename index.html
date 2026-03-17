@@ -845,6 +845,49 @@
     .dot.loading { background: var(--warning); animation: pulse .8s ease-in-out infinite; }
     .dot.error { background: var(--danger); }
     @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+    /* ── Volltext-Suchleiste ── */
+    .fulltext-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 20px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(0,194,255,.04);
+      flex-shrink: 0;
+    }
+    .fulltext-wrap {
+      flex: 1;
+      position: relative;
+    }
+    .fulltext-wrap svg {
+      position: absolute;
+      left: 10px; top: 50%;
+      transform: translateY(-50%);
+      width: 14px; height: 14px;
+      fill: var(--accent);
+      opacity: .8;
+    }
+    #fulltextInput {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--accent2);
+      border-radius: 6px;
+      padding: 6px 10px 6px 30px;
+      font-size: 13px;
+      color: var(--text);
+      font-family: var(--font-ui);
+      outline: none;
+      transition: border-color .2s;
+    }
+    #fulltextInput:focus { border-color: var(--accent); }
+    #fulltextInput::placeholder { color: var(--muted); }
+    .fulltext-status { font-size: 11px; color: var(--muted); white-space: nowrap; }
+    .fulltext-status.done { color: var(--success); }
+    .fulltext-status.searching { color: var(--warning); }
+    /* Treffer-Highlighting */
+    tr.api-match { background: rgba(0,194,255,.07) !important; }
+    tr.api-match td.name-cell .file-link { color: var(--accent) !important; }
   </style>
 </head>
 <body>
@@ -892,13 +935,24 @@
   </div>
 
   <div class="stat-pill">Gesamt: <span id="totalCount">0</span></div>
-  <button class="btn" onclick="testSearchApi()" id="searchApiBtn" title="Trimble Search API testen">
-    <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
-    API-Suche
-  </button>
   <button class="btn primary" onclick="loadFiles()">
     <svg viewBox="0 0 24 24"><path d="M17.65 6.35A7.958 7.958 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
     Aktualisieren
+  </button>
+</div>
+
+<!-- Volltext-Suchleiste (Trimble Search API) -->
+<div class="fulltext-bar" id="fulltextBar" style="display:none">
+  <div class="fulltext-wrap">
+    <svg viewBox="0 0 24 24"><path d="M9 3C5.13 3 2 6.13 2 10s3.13 7 7 7a6.96 6.96 0 004.33-1.5l5.08 5.08 1.42-1.42-5.08-5.08A6.96 6.96 0 0016 10c0-3.87-3.13-7-7-7zm0 2a5 5 0 010 10A5 5 0 019 5zm-.5 2v3.5H5v1h3.5V15h1v-3.5H13v-1H9.5V7h-1z"/></svg>
+    <input type="text" id="fulltextInput"
+           placeholder="Volltext-Suche (Enter)…"
+           onkeydown="if(event.key==='Enter') runApiSearch()"
+           oninput="if(!this.value) clearApiSearch()" />
+  </div>
+  <span class="fulltext-status" id="ftStatus"></span>
+  <button class="btn" onclick="clearApiSearch()" id="ftClearBtn" style="display:none;padding:5px 10px;font-size:11px">
+    ✕ Zurücksetzen
   </button>
 </div>
 
@@ -1829,6 +1883,15 @@ function renderTable() {
     const hasId    = !!fileId;
 
     const tr = document.createElement('tr');
+    // API-Suche Treffer markieren
+    if (apiSearchResults !== null) {
+      const fid = getFileId(f);
+      if (fid && apiSearchResults.has(fid)) {
+        tr.classList.add('api-match');
+      } else {
+        tr.style.opacity = '0.3';
+      }
+    }
     tr.innerHTML = `
       <td>
         <div class="name-cell">
@@ -2102,7 +2165,7 @@ function showState(s) {
   document.getElementById('stateError').style.display   = s === 'error'   ? 'flex' : 'none';
   document.getElementById('stateEmpty').style.display   = s === 'empty'   ? 'flex' : 'none';
   document.getElementById('tableWrap').style.display    = s === 'table'   ? 'block': 'none';
-  // tree panel always visible after initial load
+  document.getElementById('fulltextBar').style.display  = s === 'table'   ? 'flex' : 'none';
   const split = document.querySelector('.content-split');
   if (split) split.style.display = (s === 'loading' && !folderTree) ? 'none' : 'flex';
   if (s !== 'table') closePreview();
@@ -2138,58 +2201,79 @@ function escHtml(str) {
 }
 
 // ─────────────────────────────────────────
-//  Trimble Search API Test
+//  Trimble Search API — Volltext-Suche
 // ─────────────────────────────────────────
-async function testSearchApi() {
-  const query = prompt('Suchbegriff für Trimble Search API eingeben:');
-  if (!query) return;
+let apiSearchResults = null; // null = keine Suche aktiv, Set = Treffer-IDs
 
-  const btn = document.getElementById('searchApiBtn');
-  btn.textContent = '⏳ Suche…';
-  btn.disabled = true;
+async function runApiSearch() {
+  const query = (document.getElementById('fulltextInput')?.value || '').trim();
+  if (!query) { clearApiSearch(); return; }
+
+  const statusEl  = document.getElementById('ftStatus');
+  const clearBtn  = document.getElementById('ftClearBtn');
+  statusEl.className = 'fulltext-status searching';
+  statusEl.textContent = 'Suche…';
+  clearBtn.style.display = 'none';
 
   try {
-    // Endpunkt: GET /search?query=...&projectId=...&objectType=file
-    const url = `${tcApiBase}/search?query=${encodeURIComponent(query)}&projectId=${projectId}&objectType=file&limit=50`;
-    console.log('[S+L Explorer] Search API URL:', url);
+    // Seiten durchlaufen (API gibt max. 50 pro Anfrage, Status 206 = weitere Seiten)
+    let allResults = [];
+    let offset = 0;
+    const limit = 50;
+    let hasMore = true;
 
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${accessToken}` }
-    });
-    const raw = await res.text();
-    console.log('[S+L Explorer] Search API Status:', res.status);
-    console.log('[S+L Explorer] Search API Response:', raw.slice(0, 1000));
-
-    if (!res.ok) {
-      // Versuch ohne objectType
-      const url2 = `${tcApiBase}/search?query=${encodeURIComponent(query)}&projectId=${projectId}&limit=50`;
-      console.log('[S+L Explorer] Retry ohne objectType:', url2);
-      const res2 = await fetch(url2, { headers: { Authorization: `Bearer ${accessToken}` } });
-      const raw2 = await res2.text();
-      console.log('[S+L Explorer] Retry Status:', res2.status, '| Response:', raw2.slice(0, 500));
-      alert(`Search API:\nURL 1 (${res.status}): ${raw.slice(0,150)}\nURL 2 (${res2.status}): ${raw2.slice(0,150)}\n\nDetails in F12 → Konsole`);
-      return;
+    while (hasMore) {
+      const url = `${tcApiBase}/search?query=${encodeURIComponent(query)}&projectId=${projectId}&objectType=file&limit=${limit}&offset=${offset}`;
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+      if (!res.ok && res.status !== 206) break;
+      const data = await res.json();
+      const page = Array.isArray(data) ? data : (data.results || data.list || data.items || []);
+      allResults = allResults.concat(page);
+      // 206 = partial, mehr Seiten; 200 = alle Ergebnisse
+      hasMore = res.status === 206 && page.length === limit;
+      offset += limit;
+      if (offset > 500) break; // Sicherheitslimit
     }
 
-    const data = JSON.parse(raw);
-    const results = Array.isArray(data) ? data : (data.results || data.list || data.items || data.hits || []);
-    console.log('[S+L Explorer] Ergebnisse:', results.length, '| Keys:', results[0] ? Object.keys(results[0]).join(', ') : 'keine');
-
-    if (results.length === 0) {
-      alert(`Search API antwortet ✓\nKeine Treffer für "${query}"\n\nHinweis: Möglicherweise durchsucht die API nur Dateinamen/Metadaten, keinen PDF-Volltext.`);
-    } else {
-      const preview = results.slice(0, 5).map(r =>
-        r.name || r.title || r.fileName || r.id || JSON.stringify(r).slice(0, 80)
-      ).join('\n');
-      alert(`Search API: ${results.length} Treffer für "${query}"\n\n${preview}\n\nVollständige Antwort in F12 → Konsole`);
+    // Ergebnis-IDs sammeln (aus details.id oder details.versionId)
+    const matchIds = new Set();
+    const matchNames = new Set();
+    for (const r of allResults) {
+      const d = r.details || r;
+      if (d.id) matchIds.add(d.id);
+      if (d.versionId) matchIds.add(d.versionId);
+      if (d.name) matchNames.add(d.name.toLowerCase());
     }
+
+    apiSearchResults = matchIds;
+    const count = allResults.filter(r => {
+      const d = r.details || r;
+      return (d.name || '').toLowerCase().endsWith('.pdf');
+    }).length;
+
+    statusEl.className = 'fulltext-status done';
+    statusEl.textContent = `${count} PDF-Treffer für „${query}"`;
+    clearBtn.style.display = 'flex';
+
+    console.log('[S+L Explorer] API-Suche:', allResults.length, 'Treffer gesamt |', count, 'PDFs');
+    renderTable();
+
   } catch (err) {
-    console.error('[S+L Explorer] Search API Fehler:', err);
-    alert(`Fehler: ${err.message}`);
-  } finally {
-    btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg> API-Suche';
-    btn.disabled = false;
+    statusEl.className = 'fulltext-status';
+    statusEl.textContent = `Fehler: ${err.message}`;
+    console.error('[S+L Explorer] API-Suche Fehler:', err);
   }
+}
+
+function clearApiSearch() {
+  apiSearchResults = null;
+  const inp = document.getElementById('fulltextInput');
+  if (inp) inp.value = '';
+  const statusEl = document.getElementById('ftStatus');
+  if (statusEl) { statusEl.textContent = ''; statusEl.className = 'fulltext-status'; }
+  const clearBtn = document.getElementById('ftClearBtn');
+  if (clearBtn) clearBtn.style.display = 'none';
+  renderTable();
 }
 
 // ─────────────────────────────────────────
@@ -2227,7 +2311,7 @@ async function testSearchApi() {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v46 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v47 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
