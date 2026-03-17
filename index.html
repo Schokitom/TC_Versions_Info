@@ -1275,7 +1275,9 @@ async function tcGetBuffer(path) {
         return buf;
       }
     }
-    console.warn('[S+L Explorer] Proxy-Antwort:', resp.status, resp.statusText);
+    // Fehler-Details aus dem Response-Body lesen
+    const errText = await resp.text().catch(() => '');
+    console.warn('[S+L Explorer] Proxy-Antwort:', resp.status, resp.statusText, '|', errText.slice(0, 300));
   } catch (e) {
     console.warn('[S+L Explorer] Proxy-Fehler:', e.message);
   }
@@ -2509,7 +2511,7 @@ function escHtml(str) {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v41 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v42 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
