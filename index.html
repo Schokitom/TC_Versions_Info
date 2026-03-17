@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>S+L Explorer</title>
   <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -2009,10 +2010,16 @@ function renderTable() {
     const idx      = allFiles.indexOf(f);
     const fileId   = getFileId(f);
     const hasId    = !!fileId;
+    const isChecked = fileId ? selectedFileIds.has(fileId) : false;
 
     const tr = document.createElement('tr');
-    // API-Suche Treffer markieren
     tr.innerHTML = `
+      <td class="row-check-td">
+        <input type="checkbox" class="row-checkbox"
+               data-id="${escHtml(fileId || '')}"
+               ${isChecked ? 'checked' : ''}
+               onchange="toggleRowSelect(this)" />
+      </td>
       <td>
         <div class="name-cell">
           <div class="pdf-icon">PDF</div>
@@ -2558,36 +2565,22 @@ async function downloadSelected() {
   const progBar  = document.getElementById('dlProgressBar');
   const progLbl  = document.getElementById('dlProgressLabel');
 
-  // Dateiobjekte sammeln — aus allFiles + searchResultFiles
   const pool = searchResultFiles ? [...searchResultFiles, ...allFiles] : [...allFiles];
   const toDownload = [];
   for (const key of selectedFileIds) {
-    const f = pool.find(x => getFileId(x) === key) || allFiles[key];
+    const f = pool.find(x => getFileId(x) === key);
     if (f) toDownload.push(f);
   }
   if (toDownload.length === 0) return;
 
   btn.disabled = true;
   progWrap.classList.add('visible');
-  progLbl.textContent = '';
+  progBar.style.width = '0%';
+  progLbl.textContent = `Bereite ZIP vor…`;
 
-  let done = 0;
-  for (const f of toDownload) {
-    const fid  = getFileId(f);
-    const name = f.name || 'download';
-    progLbl.textContent = `${done + 1} / ${toDownload.length}: ${name}`;
-    try {
-      await downloadFileDirect(fid, name);
-    } catch (e) {
-      console.warn('[S+L Explorer] Download fehlgeschlagen:', name, e.message);
-    }
-    done++;
-    progBar.style.width = Math.round((done / toDownload.length) * 100) + '%';
-    // Kurze Pause damit Browser Downloads nicht blockiert
-    await new Promise(r => setTimeout(r, 400));
-  }
+  await buildAndDownloadZip(toDownload, 'SL_Auswahl.zip', progBar, progLbl);
 
-  progLbl.textContent = `✓ ${done} Dateien heruntergeladen`;
+  progLbl.textContent = `✓ ZIP heruntergeladen`;
   setTimeout(() => {
     progWrap.classList.remove('visible');
     progBar.style.width = '0%';
@@ -2596,19 +2589,44 @@ async function downloadSelected() {
   }, 2500);
 }
 
-// Kernfunktion: eine Datei per ID herunterladen
-async function downloadFileDirect(versionId, fileName) {
-  try {
-    const data  = await tcGet(`/files/${versionId}/download`);
-    const dlUrl = typeof data === 'string' ? data : (data.url || data.downloadUrl || null);
-    if (dlUrl) {
-      const a = document.createElement('a');
-      a.href = dlUrl; a.download = fileName; a.target = '_blank';
-      document.body.appendChild(a); a.click(); document.body.removeChild(a);
-      return;
+// Kernfunktion: Dateien als ZIP herunterladen via authenticated fetch + JSZip
+async function buildAndDownloadZip(files, zipName, progBar, progLbl) {
+  const zip  = new JSZip();
+  let done   = 0;
+
+  for (const f of files) {
+    const fid  = getFileId(f);
+    const name = f.name || fid || 'datei';
+    if (progLbl) progLbl.textContent = `${done + 1}/${files.length}: ${name}`;
+    try {
+      // Datei mit Auth-Token laden
+      const res = await fetch(`${tcApiBase}/files/${fid}/download`, {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
+      if (res.ok) {
+        const blob = await res.blob();
+        // Pfad im ZIP beibehalten (ohne führenden Slash)
+        const zipPath = ((f._path || '') + '/' + name).replace(/^\//, '');
+        zip.file(zipPath, blob);
+      } else {
+        console.warn('[S+L Explorer] ZIP: Datei übersprungen:', name, res.status);
+      }
+    } catch (e) {
+      console.warn('[S+L Explorer] ZIP: Fehler bei', name, e.message);
     }
-  } catch (_) {}
-  window.open(`${tcApiBase}/files/${versionId}/download`, '_blank');
+    done++;
+    if (progBar) progBar.style.width = Math.round((done / files.length) * 100) + '%';
+  }
+
+  // ZIP generieren und herunterladen
+  if (progLbl) progLbl.textContent = 'Erstelle ZIP…';
+  const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url; a.download = zipName;
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
 // ─────────────────────────────────────────
@@ -2641,25 +2659,22 @@ async function downloadCheckedFolders() {
       return;
     }
 
-    // Bestätigung
-    const ok = confirm(`${pdfFiles.length} PDF-Dateien aus ${checkedFolderIds.size} Ordner(n) herunterladen?`);
+    const ok = confirm(`${pdfFiles.length} PDF-Dateien aus ${checkedFolderIds.size} Ordner(n) als ZIP herunterladen?`);
     if (!ok) { btn.disabled = false; setStatus('ok', 'Abgebrochen'); return; }
 
-    setStatus('loading', `Lade ${pdfFiles.length} PDFs herunter…`);
-    let done = 0;
-    for (const f of pdfFiles) {
-      const fid = getFileId(f);
-      setStatus('loading', `${done + 1}/${pdfFiles.length}: ${f.name}`);
-      try { await downloadFileDirect(fid, f.name); } catch (_) {}
-      done++;
-      await new Promise(r => setTimeout(r, 400));
-    }
-    setStatus('ok', `✓ ${done} PDFs heruntergeladen`);
+    // Ordnernamen für ZIP-Dateinamen
+    const folderNames = [...checkedFolderIds].map(id => findNodeById(folderTree, id)?.name || id).join('_').slice(0, 40);
+    const zipName = `SL_${folderNames}.zip`;
+
+    setStatus('loading', `Erstelle ZIP mit ${pdfFiles.length} PDFs…`);
+    await buildAndDownloadZip(pdfFiles, zipName, null, null);
+    setStatus('ok', `✓ ZIP heruntergeladen (${pdfFiles.length} PDFs)`);
   } catch (err) {
     setStatus('error', `Fehler: ${err.message}`);
   }
   btn.disabled = false;
 }
+
 
 
 // ─────────────────────────────────────────
@@ -2773,7 +2788,7 @@ async function downloadCheckedFolders() {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v56 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v57 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
