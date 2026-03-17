@@ -301,6 +301,40 @@
       width: 520px;
       border-left-width: 1px;
     }
+    .preview-panel.resizing {
+      transition: none; /* Keine Animation während Drag */
+    }
+
+    /* ── Resize Handle ── */
+    .preview-resize-handle {
+      width: 5px;
+      flex-shrink: 0;
+      cursor: col-resize;
+      background: transparent;
+      position: relative;
+      z-index: 10;
+      transition: background .15s;
+    }
+    .preview-resize-handle:hover,
+    .preview-resize-handle.dragging {
+      background: var(--accent);
+    }
+    .preview-resize-handle::after {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 3px;
+      height: 40px;
+      border-radius: 2px;
+      background: var(--border);
+      transition: background .15s;
+    }
+    .preview-resize-handle:hover::after,
+    .preview-resize-handle.dragging::after {
+      background: var(--accent);
+    }
     .preview-header {
       display: flex;
       align-items: center;
@@ -1006,6 +1040,7 @@
 </div>
 
 <!-- Preview Panel -->
+<div class="preview-resize-handle" id="previewResizeHandle" style="display:none"></div>
 <div class="preview-panel" id="previewPanel">
   <div class="preview-header">
     <div class="preview-title" id="previewTitle">Vorschau</div>
@@ -1268,6 +1303,7 @@ async function openPreview(idx) {
 
   // Open panel
   panel.classList.add('open');
+  document.getElementById('previewResizeHandle').style.display = 'block';
   titleEl.textContent = f.name || 'Vorschau';
   currentZoom = 1.0; // reset zoom for each new file
 
@@ -1360,6 +1396,9 @@ async function openPreview(idx) {
 function closePreview() {
   const panel = document.getElementById('previewPanel');
   panel.classList.remove('open');
+  panel.classList.remove('resizing');
+  panel.style.width = ''; // Reset auf CSS-Klassen-Breite
+  document.getElementById('previewResizeHandle').style.display = 'none';
   previewBaseUrl = null;
   if (currentPreviewIdx !== null) {
     document.getElementById(`prev-btn-${currentPreviewIdx}`)?.classList.remove('active');
@@ -2350,6 +2389,58 @@ function escHtml(str) {
 }
 
 // ─────────────────────────────────────────
+//  Preview Panel — Resize via Drag
+// ─────────────────────────────────────────
+(function initResizeHandle() {
+  const MIN_WIDTH = 280;
+  let isDragging = false;
+
+  document.addEventListener('mousedown', e => {
+    const handle = document.getElementById('previewResizeHandle');
+    if (!handle || e.target !== handle) return;
+    e.preventDefault();
+    isDragging = true;
+    handle.classList.add('dragging');
+    const panel = document.getElementById('previewPanel');
+    panel.classList.add('resizing');
+    // Pointer-Events auf iframe deaktivieren damit Drag nicht blockiert wird
+    const iframe = panel.querySelector('iframe');
+    if (iframe) iframe.style.pointerEvents = 'none';
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  });
+
+  document.addEventListener('mousemove', e => {
+    if (!isDragging) return;
+    const panel = document.getElementById('previewPanel');
+    const split = document.querySelector('.content-split');
+    if (!panel || !split) return;
+
+    const splitRect = split.getBoundingClientRect();
+    const maxWidth  = Math.floor(splitRect.width * 0.5); // max 50% des Explorers
+    const newWidth  = Math.max(MIN_WIDTH, Math.min(maxWidth, splitRect.right - e.clientX));
+
+    panel.style.width = newWidth + 'px';
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (!isDragging) return;
+    isDragging = false;
+    const handle = document.getElementById('previewResizeHandle');
+    if (handle) handle.classList.remove('dragging');
+    const panel = document.getElementById('previewPanel');
+    if (panel) {
+      panel.classList.remove('resizing');
+      // Pointer-Events auf iframe wieder aktivieren
+      const iframe = panel.querySelector('iframe');
+      if (iframe) iframe.style.pointerEvents = '';
+    }
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+  });
+})();
+
+// ─────────────────────────────────────────
 (async () => {
   try {
     API = await TrimbleConnectWorkspace.connect(
@@ -2384,7 +2475,7 @@ function escHtml(str) {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v52 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v53 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
