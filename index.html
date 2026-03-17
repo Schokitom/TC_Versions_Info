@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>S+L Explorer</title>
   <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -1047,14 +1046,10 @@
 <!-- Bulk-Download-Leiste -->
 <div class="bulk-bar" id="bulkBar">
   <span class="bulk-count"><span id="bulkCount">0</span> ausgewählt</span>
-  <button class="bulk-dl-btn" id="bulkDlBtn" onclick="downloadSelected()">
+  <button class="bulk-dl-btn" id="bulkDlBtn" onclick="openEmbeddedExplorerForDownload()">
     <svg viewBox="0 0 24 24"><path d="M5 20h14v-2H5v2zm7-14v8.17l-2.59-2.58L8 13l4 4 4-4-1.41-1.41L13 14.17V6h-1z"/></svg>
-    Auswahl herunterladen
+    Herunterladen
   </button>
-  <div class="dl-progress-wrap" id="dlProgressWrap">
-    <div class="dl-progress-bar" id="dlProgressBar"></div>
-  </div>
-  <span id="dlProgressLabel" style="font-size:11px;color:var(--muted)"></span>
   <button class="bulk-clear-btn" onclick="clearSelection()">✕ Auswahl aufheben</button>
 </div>
 <div class="state-overlay" id="stateLoading">
@@ -1160,6 +1155,30 @@
 </div><!-- end content-split -->
 
 <!-- Version Modal -->
+<!-- Embedded Explorer Download Modal -->
+<div class="modal-overlay hidden" id="explorerModal">
+  <div class="modal" style="max-width:960px;height:80vh;display:flex;flex-direction:column">
+    <div class="modal-header">
+      <div class="pdf-icon">
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="#fff"><path d="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2z"/></svg>
+      </div>
+      <div class="modal-title" id="explorerModalTitle">Trimble Connect Explorer — Dateien herunterladen</div>
+      <div style="font-size:11px;color:var(--muted);margin-right:8px">Dateien im Explorer auswählen und herunterladen</div>
+      <button class="modal-close" onclick="closeExplorerModal()">✕</button>
+    </div>
+    <div style="flex:1;overflow:hidden;position:relative">
+      <iframe id="explorerIframe" src="#" style="width:100%;height:100%;border:none;display:none"></iframe>
+      <div id="explorerLoading" style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:12px;color:var(--muted)">
+        <div class="spinner"></div>
+        <span>Lade Trimble Connect Explorer…</span>
+      </div>
+    </div>
+    <div style="padding:10px 16px;border-top:1px solid var(--border);font-size:11px;color:var(--muted);display:flex;align-items:center;gap:8px">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+      Der echte Trimble Connect Explorer wird hier eingebettet. Dateien dort auswählen und mit dem nativen Download-Button herunterladen.
+    </div>
+  </div>
+</div>
 <div class="modal-overlay hidden" id="versionModal" onclick="closeVersionModal(event)">
   <div class="modal">
     <div class="modal-header">
@@ -2559,125 +2578,93 @@ function updateBulkBar() {
   }
 }
 
-async function downloadSelected() {
-  const btn      = document.getElementById('bulkDlBtn');
-  const progWrap = document.getElementById('dlProgressWrap');
-  const progBar  = document.getElementById('dlProgressBar');
-  const progLbl  = document.getElementById('dlProgressLabel');
+// ─────────────────────────────────────────
+//  Embedded Explorer Download
+// ─────────────────────────────────────────
+let explorerAPI = null;
 
+async function openEmbeddedExplorerForDownload() {
+  if (selectedFileIds.size === 0) return;
+
+  // Bestimme den Ordner der ausgewählten Dateien
+  // Wenn alle in einem Ordner → direkt dorthin navigieren
   const pool = searchResultFiles ? [...searchResultFiles, ...allFiles] : [...allFiles];
-  const toDownload = [];
+  const selectedFiles = [];
   for (const key of selectedFileIds) {
     const f = pool.find(x => getFileId(x) === key);
-    if (f) toDownload.push(f);
+    if (f) selectedFiles.push(f);
   }
-  if (toDownload.length === 0) return;
 
-  btn.disabled = true;
-  progWrap.classList.add('visible');
-  progBar.style.width = '0%';
-  progLbl.textContent = `Bereite ZIP vor…`;
+  // Ordner-IDs der ausgewählten Dateien bestimmen
+  const folderIds = [...new Set(selectedFiles.map(f => f.parentId || f._folderId || rootFolderId))];
+  const folderId  = folderIds.length === 1 ? folderIds[0] : rootFolderId;
 
-  await buildAndDownloadZip(toDownload, 'SL_Auswahl.zip', progBar, progLbl);
+  // Modal öffnen
+  const modal = document.getElementById('explorerModal');
+  const title = document.getElementById('explorerModalTitle');
+  const iframe = document.getElementById('explorerIframe');
+  const loading = document.getElementById('explorerLoading');
 
-  progLbl.textContent = `✓ ZIP heruntergeladen`;
-  setTimeout(() => {
-    progWrap.classList.remove('visible');
-    progBar.style.width = '0%';
-    progLbl.textContent = '';
-    btn.disabled = false;
-  }, 2500);
+  title.textContent = `Trimble Connect Explorer — ${selectedFiles.length} Datei(en) ausgewählt`;
+  modal.classList.remove('hidden');
+  iframe.style.display = 'none';
+  loading.style.display = 'flex';
+
+  // Iframe URL setzen
+  const embedUrl = TrimbleConnectWorkspace.getConnectEmbedUrl();
+  iframe.src = embedUrl;
+
+  // Workspace API an den iframe koppeln
+  try {
+    explorerAPI = await TrimbleConnectWorkspace.connect(
+      iframe,
+      (event, args) => {
+        console.log('[S+L Explorer] ExplorerModal Event:', event, args);
+      },
+      15000
+    );
+
+    // Token übergeben
+    await explorerAPI.embed.setTokens({ accessToken });
+
+    // Zum richtigen Ordner navigieren
+    await explorerAPI.embed.initFileExplorer({
+      projectId,
+      folderId
+    });
+
+    // Loading ausblenden, Explorer zeigen
+    iframe.style.display = 'block';
+    loading.style.display = 'none';
+
+    console.log('[S+L Explorer] Embedded Explorer geladen, Ordner:', folderId);
+
+  } catch (err) {
+    console.error('[S+L Explorer] Embedded Explorer Fehler:', err);
+    loading.innerHTML = `<div style="color:var(--danger);text-align:center;padding:20px">
+      <div style="font-size:24px;margin-bottom:8px">⚠️</div>
+      <div>Explorer konnte nicht geladen werden: ${escHtml(err.message)}</div>
+      <div style="margin-top:12px;font-size:11px;color:var(--muted)">
+        Bitte den Trimble Connect Explorer direkt öffnen:
+        <a href="https://web.connect.trimble.com/projects/${projectId}" target="_blank"
+           style="color:var(--accent)">web.connect.trimble.com</a>
+      </div>
+    </div>`;
+  }
 }
 
-// Kernfunktion: Dateien als ZIP herunterladen via authenticated fetch + JSZip
-async function buildAndDownloadZip(files, zipName, progBar, progLbl) {
-  const PROXY = 'https://slproxy.schoknechtthomas.workers.dev';
-  const zip   = new JSZip();
-  let done    = 0;
-  let added   = 0;
-  let firstFailDiagnosed = false;
-
-  for (const f of files) {
-    const fid  = getFileId(f);
-    const name = f.name || fid || 'datei';
-    if (progLbl) progLbl.textContent = `${done + 1}/${files.length}: ${name}`;
-
-    try {
-      const res = await fetch(PROXY, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          token:    accessToken,
-          fileId:   fid,
-          apiBase:  tcApiBase,
-          fileName: name
-        })
-      });
-
-      if (res.ok) {
-        const buf = await res.arrayBuffer();
-        if (buf.byteLength > 0) {
-          const zipPath = ((f._path || '') + '/' + name).replace(/^\//, '');
-          zip.file(zipPath, buf);
-          added++;
-          console.log(`[S+L Explorer] ZIP ✓ ${name} (${buf.byteLength} bytes)`);
-        } else {
-          console.warn(`[S+L Explorer] ZIP: leere Antwort für ${name}`);
-        }
-      } else {
-        const errText = await res.text().catch(() => '');
-        console.warn(`[S+L Explorer] ZIP: Worker ${res.status} für ${name} | ${errText.slice(0,300)}`);
-
-        // Erste fehlgeschlagene Datei: Diagnose-Request senden
-        if (!firstFailDiagnosed) {
-          firstFailDiagnosed = true;
-          console.log('[S+L Explorer] Sende Diagnose-Request für erste fehlgeschlagene Datei…');
-          try {
-            const diagRes = await fetch(PROXY, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                token:    accessToken,
-                fileId:   fid,
-                apiBase:  tcApiBase,
-                fileName: name,
-                diagnose: true
-              })
-            });
-            const diagData = await diagRes.json();
-            console.log('[S+L Explorer] DIAGNOSE-ERGEBNIS:', JSON.stringify(diagData, null, 2));
-          } catch (de) {
-            console.warn('[S+L Explorer] Diagnose fehlgeschlagen:', de.message);
-          }
-        }
-      }
-    } catch (e) {
-      console.warn(`[S+L Explorer] ZIP: fetch-Fehler für ${name} | ${e.message}`);
-    }
-
-    done++;
-    if (progBar) progBar.style.width = Math.round((done / files.length) * 100) + '%';
-  }
-
-  if (added === 0) {
-    alert(`ZIP konnte nicht erstellt werden — keine Dateien konnten heruntergeladen werden.\n\nBitte F12 → Konsole für Details prüfen (DIAGNOSE-ERGEBNIS).`);
-    return;
-  }
-
-  if (progLbl) progLbl.textContent = `Erstelle ZIP (${added}/${files.length} Dateien)…`;
-  const blob = await zip.generateAsync({
-    type: 'blob',
-    compression: 'DEFLATE',
-    compressionOptions: { level: 1 }
-  });
-  const url = URL.createObjectURL(blob);
-  const a   = document.createElement('a');
-  a.href = url; a.download = zipName;
-  document.body.appendChild(a); a.click();
-  document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(url), 5000);
-  console.log(`[S+L Explorer] ZIP fertig: ${added}/${files.length} Dateien`);
+function closeExplorerModal() {
+  const modal  = document.getElementById('explorerModal');
+  const iframe = document.getElementById('explorerIframe');
+  modal.classList.add('hidden');
+  // iframe src zurücksetzen um Verbindung zu trennen
+  iframe.src = '#';
+  iframe.style.display = 'none';
+  explorerAPI = null;
+  document.getElementById('explorerLoading').style.display = 'flex';
+  document.getElementById('explorerLoading').innerHTML = `<div class="spinner"></div><span>Lade Trimble Connect Explorer…</span>`;
 }
+
 
 // ─────────────────────────────────────────
 //  Ordner-Download aus Baumstruktur
@@ -2690,40 +2677,41 @@ function updateTreeDlBtn() {
 async function downloadCheckedFolders() {
   if (checkedFolderIds.size === 0) return;
 
-  const btn = document.getElementById('treeDlBtn');
-  btn.disabled = true;
-  setStatus('loading', `Sammle Dateien aus ${checkedFolderIds.size} Ordner(n)…`);
+  // Ersten markierten Ordner im embedded Explorer öffnen
+  const firstId   = [...checkedFolderIds][0];
+  const firstNode = findNodeById(folderTree, firstId);
+  const folderId  = firstId;
+
+  const modal   = document.getElementById('explorerModal');
+  const title   = document.getElementById('explorerModalTitle');
+  const iframe  = document.getElementById('explorerIframe');
+  const loading = document.getElementById('explorerLoading');
+
+  const folderNames = [...checkedFolderIds]
+    .map(id => findNodeById(folderTree, id)?.name || id)
+    .join(', ').slice(0, 60);
+  title.textContent = `Trimble Connect Explorer — ${folderNames}`;
+  modal.classList.remove('hidden');
+  iframe.style.display = 'none';
+  loading.style.display = 'flex';
+  loading.innerHTML = `<div class="spinner"></div><span>Lade Trimble Connect Explorer…</span>`;
+
+  const embedUrl = TrimbleConnectWorkspace.getConnectEmbedUrl();
+  iframe.src = embedUrl;
 
   try {
-    let allEntries = [];
-    for (const id of checkedFolderIds) {
-      const node = findNodeById(folderTree, id);
-      const entries = await collectFiles(id, node?.path || '/', 0);
-      allEntries = allEntries.concat(entries);
-    }
-
-    const pdfFiles = allEntries.filter(f => (f.name || '').toLowerCase().endsWith('.pdf'));
-    if (pdfFiles.length === 0) {
-      setStatus('ok', 'Keine PDF-Dateien in den gewählten Ordnern');
-      btn.disabled = false;
-      return;
-    }
-
-    const ok = confirm(`${pdfFiles.length} PDF-Dateien aus ${checkedFolderIds.size} Ordner(n) als ZIP herunterladen?`);
-    if (!ok) { btn.disabled = false; setStatus('ok', 'Abgebrochen'); return; }
-
-    // Ordnernamen für ZIP-Dateinamen
-    const folderNames = [...checkedFolderIds].map(id => findNodeById(folderTree, id)?.name || id).join('_').slice(0, 40);
-    const zipName = `SL_${folderNames}.zip`;
-
-    setStatus('loading', `Erstelle ZIP mit ${pdfFiles.length} PDFs…`);
-    await buildAndDownloadZip(pdfFiles, zipName, null, null);
-    setStatus('ok', `✓ ZIP heruntergeladen (${pdfFiles.length} PDFs)`);
+    explorerAPI = await TrimbleConnectWorkspace.connect(iframe, () => {}, 15000);
+    await explorerAPI.embed.setTokens({ accessToken });
+    await explorerAPI.embed.initFileExplorer({ projectId, folderId });
+    iframe.style.display = 'block';
+    loading.style.display = 'none';
   } catch (err) {
-    setStatus('error', `Fehler: ${err.message}`);
+    loading.innerHTML = `<div style="color:var(--danger);text-align:center;padding:20px">
+      ⚠️ Explorer konnte nicht geladen werden: ${escHtml(err.message)}
+    </div>`;
   }
-  btn.disabled = false;
 }
+
 
 
 
@@ -2838,7 +2826,7 @@ async function downloadCheckedFolders() {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v60 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v62 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
