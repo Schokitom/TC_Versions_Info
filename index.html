@@ -448,7 +448,6 @@
     .prev-btn:hover, .prev-btn.active { border-color: var(--accent); color: var(--accent); background: var(--row-hover); }
     .prev-btn svg { width: 14px; height: 14px; fill: currentColor; display: block; }
 
-
     table {
       width: 100%;
       border-collapse: collapse;
@@ -893,6 +892,10 @@
   </div>
 
   <div class="stat-pill">Gesamt: <span id="totalCount">0</span></div>
+  <button class="btn" onclick="testSearchApi()" id="searchApiBtn" title="Trimble Search API testen">
+    <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+    API-Suche
+  </button>
   <button class="btn primary" onclick="loadFiles()">
     <svg viewBox="0 0 24 24"><path d="M17.65 6.35A7.958 7.958 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
     Aktualisieren
@@ -925,7 +928,7 @@
 </div>
 
 <!-- Split layout: folder tree + table + preview -->
-<div class="content-split">
+<div class="content-split" style="display:none">
 
 <!-- Folder Tree Panel -->
 <div class="tree-panel" id="treePanel">
@@ -1241,9 +1244,6 @@ async function openPreview(idx) {
   document.getElementById('zoomToolbar').style.display = 'none';
 
   const versionId = f.versionId || f.id;
-
-  // Proxy-URL für scharfe PDF-Vorschau
-  const PROXY = 'https://slproxy.schoknechtthomas.workers.dev';
 
   try {
     // Trimble 2D Viewer direkt im iframe einbetten
@@ -1824,12 +1824,9 @@ function renderTable() {
     const versions = f._versionCount || 1;
     const path     = f._path || '/';
     const initials = modBy.split(/[\s.@]+/).map(n => n[0]).filter(Boolean).join('').toUpperCase().slice(0, 2) || '?';
-
-    // Store full object reference by index for openFile()
-    const idx = allFiles.indexOf(f);
-
-    const fileId    = getFileId(f);
-    const hasId     = !!fileId;
+    const idx      = allFiles.indexOf(f);
+    const fileId   = getFileId(f);
+    const hasId    = !!fileId;
 
     const tr = document.createElement('tr');
     tr.innerHTML = `
@@ -2141,7 +2138,60 @@ function escHtml(str) {
 }
 
 // ─────────────────────────────────────────
-//  Trimble Workspace API init
+//  Trimble Search API Test
+// ─────────────────────────────────────────
+async function testSearchApi() {
+  const query = prompt('Suchbegriff für Trimble Search API eingeben:');
+  if (!query) return;
+
+  const btn = document.getElementById('searchApiBtn');
+  btn.textContent = '⏳ Suche…';
+  btn.disabled = true;
+
+  try {
+    // Endpunkt: GET /search?query=...&projectId=...&objectType=file
+    const url = `${tcApiBase}/search?query=${encodeURIComponent(query)}&projectId=${projectId}&objectType=file&limit=50`;
+    console.log('[S+L Explorer] Search API URL:', url);
+
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
+    const raw = await res.text();
+    console.log('[S+L Explorer] Search API Status:', res.status);
+    console.log('[S+L Explorer] Search API Response:', raw.slice(0, 1000));
+
+    if (!res.ok) {
+      // Versuch ohne objectType
+      const url2 = `${tcApiBase}/search?query=${encodeURIComponent(query)}&projectId=${projectId}&limit=50`;
+      console.log('[S+L Explorer] Retry ohne objectType:', url2);
+      const res2 = await fetch(url2, { headers: { Authorization: `Bearer ${accessToken}` } });
+      const raw2 = await res2.text();
+      console.log('[S+L Explorer] Retry Status:', res2.status, '| Response:', raw2.slice(0, 500));
+      alert(`Search API:\nURL 1 (${res.status}): ${raw.slice(0,150)}\nURL 2 (${res2.status}): ${raw2.slice(0,150)}\n\nDetails in F12 → Konsole`);
+      return;
+    }
+
+    const data = JSON.parse(raw);
+    const results = Array.isArray(data) ? data : (data.results || data.list || data.items || data.hits || []);
+    console.log('[S+L Explorer] Ergebnisse:', results.length, '| Keys:', results[0] ? Object.keys(results[0]).join(', ') : 'keine');
+
+    if (results.length === 0) {
+      alert(`Search API antwortet ✓\nKeine Treffer für "${query}"\n\nHinweis: Möglicherweise durchsucht die API nur Dateinamen/Metadaten, keinen PDF-Volltext.`);
+    } else {
+      const preview = results.slice(0, 5).map(r =>
+        r.name || r.title || r.fileName || r.id || JSON.stringify(r).slice(0, 80)
+      ).join('\n');
+      alert(`Search API: ${results.length} Treffer für "${query}"\n\n${preview}\n\nVollständige Antwort in F12 → Konsole`);
+    }
+  } catch (err) {
+    console.error('[S+L Explorer] Search API Fehler:', err);
+    alert(`Fehler: ${err.message}`);
+  } finally {
+    btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg> API-Suche';
+    btn.disabled = false;
+  }
+}
+
 // ─────────────────────────────────────────
 (async () => {
   try {
@@ -2177,7 +2227,7 @@ function escHtml(str) {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v32 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v46 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
