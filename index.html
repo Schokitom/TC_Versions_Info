@@ -1053,7 +1053,8 @@ let accessToken = null;
 let projectId = null;
 let rootFolderId = null;
 let tcApiBase = null;
-let allFiles = [];
+let allFiles  = []; // aktuell angezeigte Dateien (wird durch Suche NICHT verändert)
+let baseFiles = []; // unveränderliche Kopie der per "Anwenden" geladenen Dateien
 let sortKey = 'name';
 let sortAsc = true;
 let selectedPaths = new Set(); // leeres Set = alle anzeigen
@@ -1677,7 +1678,8 @@ async function applyFolderFilter() {
       setProgress(Math.min(prog, 95));
     }
 
-    allFiles = pdfFiles;
+    allFiles  = pdfFiles;
+    baseFiles = [...pdfFiles]; // unveränderliche Kopie sichern
     selectedPaths.clear();
     setProgress(100);
     buildPathDropdown();
@@ -1926,8 +1928,9 @@ function filterTable() {
   if (searchAll && query) {
     searchEntireProject(query);
   } else {
-    // Normalmodus — Suchergebnis-Modus aufheben
+    // Suche zurücksetzen — auf baseFiles (= was per "Anwenden" geladen wurde) zurück
     searchResultFiles = null;
+    allFiles = [...baseFiles]; // zurück zur sauberen Ursprungs-Liste
     if (searchAllAbortController) { searchAllAbortController.abort(); searchAllAbortController = null; }
     renderTable();
   }
@@ -1992,10 +1995,9 @@ async function searchEntireProject(query) {
   }
 }
 
-// Rendert Suchergebnisse direkt — ignoriert selectedPaths-Filter
+// Rendert Suchergebnisse direkt — ignoriert selectedPaths-Filter, verändert allFiles NICHT
 function renderSearchResults() {
   const files = searchResultFiles || [];
-  const query = (document.getElementById('searchInput')?.value || '').toLowerCase();
 
   // Sort
   const sorted = [...files].sort((a, b) => {
@@ -2007,37 +2009,45 @@ function renderSearchResults() {
     return 0;
   });
 
-  // Tabelle anzeigen
   showState('table');
   document.getElementById('toolbar').style.display = 'flex';
 
   const tbody = document.getElementById('tableBody');
   tbody.innerHTML = '';
 
-  for (const f of sorted) {
+  for (let si = 0; si < sorted.length; si++) {
+    const f = sorted[si];
     const name     = f.name || '–';
     const modBy    = getModifiedBy(f);
     const modAt    = formatDate(getModifiedAt(f));
     const versions = f._versionCount || 1;
     const path     = f._path || '/';
     const initials = modBy.split(/[\s.@]+/).map(n => n[0]).filter(Boolean).join('').toUpperCase().slice(0, 2) || '?';
-    const idx      = allFiles.indexOf(f) !== -1 ? allFiles.indexOf(f) : allFiles.push(f) - 1;
     const fileId   = getFileId(f);
     const hasId    = !!fileId;
 
+    // Prüfe ob die Datei schon in allFiles ist — falls nicht, NICHT hinzufügen
+    // Stattdessen: direkte Aufrufe über fileId
+    const existingIdx = allFiles.findIndex(af => getFileId(af) === fileId);
+    const idx = existingIdx >= 0 ? existingIdx : -1;
+
+    const openCall  = hasId && idx >= 0 ? `openFile(${idx})` : hasId ? `openFileById('${fileId}','${escHtml(f.name || '')}')` : null;
+    const prevCall  = hasId && idx >= 0 ? `openPreview(${idx})` : null;
+    const dlCall    = hasId && idx >= 0 ? `downloadFile(${idx})` : hasId ? `downloadFileById('${fileId}','${escHtml(f.name || '')}')` : null;
+    const verCall   = hasId && idx >= 0 ? `openVersionModal(${idx},'${escHtml(name)}')` : null;
+
     const tr = document.createElement('tr');
-    tr.style.background = 'rgba(0,194,255,.05)';
     tr.innerHTML = `
       <td>
         <div class="name-cell">
           <div class="pdf-icon">PDF</div>
           <span class="file-link ${hasId ? 'clickable' : ''}"
                 title="${escHtml(name)}"
-                ${hasId ? `onclick="openFile(${idx})"` : ''}>
+                ${openCall ? `onclick="${openCall}"` : ''}>
             ${escHtml(name)}
           </span>
           <button class="open-btn"
-                  ${hasId ? `onclick="openFile(${idx})"` : 'disabled style="opacity:.3;cursor:default"'}
+                  ${openCall ? `onclick="${openCall}"` : 'disabled style="opacity:.3;cursor:default"'}
                   title="Im Trimble Viewer öffnen">
             <svg viewBox="0 0 24 24"><path d="M19 19H5V5h7V3H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/></svg>
             Öffnen
@@ -2046,17 +2056,19 @@ function renderSearchResults() {
       </td>
       <td class="user-cell"><div class="user-chip"><div class="avatar">${escHtml(initials)}</div><span>${escHtml(modBy)}</span></div></td>
       <td class="date-cell">${modAt}</td>
-      <td class="versions-cell"><span class="version-badge" onclick="openVersionModal(${idx},'${escHtml(name)}')" title="Versionen">${versions}</span></td>
+      <td class="versions-cell">
+        <span class="version-badge" ${verCall ? `onclick="${verCall}"` : ''} title="Versionen">${versions}</span>
+      </td>
       <td class="path-cell" title="${escHtml(path)}">${escHtml(path || '/')}</td>
       <td style="text-align:center;vertical-align:middle;white-space:nowrap">
         <div style="display:inline-flex;gap:4px;align-items:center">
-          <button class="prev-btn" id="prev-btn-${idx}"
-                  ${hasId ? `onclick="openPreview(${idx})"` : 'disabled style="opacity:.3;cursor:default"'}
+          <button class="prev-btn" ${prevCall ? `id="prev-btn-${idx}"` : ''}
+                  ${prevCall ? `onclick="${prevCall}"` : 'disabled style="opacity:.3;cursor:default"'}
                   title="Vorschau">
             <svg viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>
           </button>
           <button class="dl-btn"
-                  ${hasId ? `onclick="downloadFile(${idx})"` : 'disabled style="opacity:.3;cursor:default"'}
+                  ${dlCall ? `onclick="${dlCall}"` : 'disabled style="opacity:.3;cursor:default"'}
                   title="Download">
             <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M5 20h14v-2H5v2zm7-14v8.17l-2.59-2.58L8 13l4 4 4-4-1.41-1.41L13 14.17V6h-1z"/></svg>
           </button>
@@ -2067,12 +2079,28 @@ function renderSearchResults() {
   }
 }
 
-// Rendert die Tabelle mit einer vorgegebenen Dateiliste (für Gesamtsuche)
-function renderTableFiltered(files, query) {
-  const backup = allFiles;
-  allFiles = files;
-  renderTable();
-  allFiles = backup;
+// Öffnet eine Datei direkt per ID (wenn nicht in allFiles)
+async function openFileById(fileId, fileName) {
+  const f = { id: fileId, versionId: fileId, name: fileName, _persistentFileId: null };
+  const persistentId = await getPersistentFileId(fileId);
+  const url = persistentId
+    ? `https://web.connect.trimble.com/projects/${projectId}/viewer/2D?id=${persistentId}&version=${fileId}&type=revisions&etag=${fileId}`
+    : `https://web.connect.trimble.com/projects/${projectId}/viewer/2D?id=${fileId}&version=${fileId}&type=revisions&etag=${fileId}`;
+  window.open(url, '_blank');
+}
+
+async function downloadFileById(fileId, fileName) {
+  try {
+    const data = await tcGet(`/files/${fileId}/download`);
+    const dlUrl = typeof data === 'string' ? data : (data.url || data.downloadUrl || null);
+    if (dlUrl) {
+      const a = document.createElement('a');
+      a.href = dlUrl; a.download = fileName; a.target = '_blank';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    } else {
+      window.open(`${tcApiBase}/files/${fileId}/download`, '_blank');
+    }
+  } catch { window.open(`${tcApiBase}/files/${fileId}/download`, '_blank'); }
 }
 
 // ─────────────────────────────────────────
@@ -2345,7 +2373,7 @@ function escHtml(str) {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v50 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v51 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
