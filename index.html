@@ -434,7 +434,7 @@
 
     /* preview button per row */
     .prev-btn {
-      opacity: 0;
+      opacity: 1;
       background: none;
       border: 1px solid var(--border);
       border-radius: 4px;
@@ -445,7 +445,6 @@
       display: inline-flex; align-items: center; justify-content: center;
       flex-shrink: 0;
     }
-    tr:hover .prev-btn { opacity: 1; }
     .prev-btn:hover, .prev-btn.active { border-color: var(--accent); color: var(--accent); background: var(--row-hover); }
     .prev-btn svg { width: 14px; height: 14px; fill: currentColor; display: block; }
 
@@ -504,6 +503,7 @@
       text-overflow: ellipsis;
       white-space: nowrap;
       transition: color .15s;
+      cursor: pointer;
     }
     td.name-cell .file-link:hover { color: #fff; text-decoration: underline; }
 
@@ -528,7 +528,7 @@
 
     /* download button */
     .dl-btn {
-      opacity: 0;
+      opacity: 1;
       background: none;
       border: 1px solid var(--border);
       border-radius: 4px;
@@ -538,7 +538,6 @@
       transition: all .15s;
       display: inline-flex; align-items: center; justify-content: center;
     }
-    tr:hover .dl-btn { opacity: 1; }
     .dl-btn:hover { border-color: #2e7d32; color: #2e7d32; background: #f1f8e9; }
     .dl-btn svg { display: block; }
 
@@ -571,8 +570,8 @@
       background: var(--surface);
       border: 1px solid var(--accent2);
       border-radius: 10px;
-      width: 100%; max-width: 620px;
-      max-height: 80vh;
+      width: 100%; max-width: 860px;
+      max-height: 85vh;
       display: flex; flex-direction: column;
       box-shadow: 0 20px 60px rgba(0,0,0,.6);
     }
@@ -2178,7 +2177,7 @@ function escHtml(str) {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v31 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v32 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
