@@ -675,10 +675,9 @@
       border: 2px solid var(--border); border-top-color: var(--accent);
       border-radius: 50%; animation: spin .6s linear infinite;
     }
-    .pdf-icon {
+    .file-icon {
       flex-shrink: 0;
       width: 22px; height: 22px;
-      background: linear-gradient(135deg, #ef4444, #b91c1c);
       border-radius: 4px;
       display: flex; align-items: center; justify-content: center;
       font-size: 7px;
@@ -686,6 +685,12 @@
       color: #fff;
       letter-spacing: .03em;
     }
+    .file-icon-pdf   { background: linear-gradient(135deg, #ef4444, #b91c1c); }
+    .file-icon-xls   { background: linear-gradient(135deg, #22c55e, #15803d); }
+    .file-icon-img   { background: linear-gradient(135deg, #3b82f6, #1d4ed8); }
+    .file-icon-3d    { background: linear-gradient(135deg, #f59e0b, #b45309); }
+    .file-icon-dwg   { background: linear-gradient(135deg, #a855f7, #7e22ce); }
+    .file-icon-other { background: linear-gradient(135deg, #6b7280, #374151); }
     td.path-cell {
       font-family: var(--font);
       font-size: 11px;
@@ -1040,7 +1045,7 @@
 
 <div class="state-overlay" id="stateLoading">
   <div class="spinner"></div>
-  <div class="state-title">Lade PDF-Dateien…</div>
+  <div class="state-title">Lade Dateien…</div>
   <div class="state-sub" id="loadingMessage">Verbinde mit Trimble Connect API</div>
 </div>
 
@@ -1058,7 +1063,7 @@
 <!-- Empty state -->
 <div class="state-overlay" id="stateEmpty" style="display:none">
   <div class="error-icon">📂</div>
-  <div class="state-title">Keine PDF-Dateien gefunden</div>
+  <div class="state-title">Keine Dateien gefunden</div>
   <div class="state-sub">Im gewählten Ordner wurden keine Dateien der ausgewählten Dateiarten gefunden.</div>
 </div>
 
@@ -1177,7 +1182,7 @@
 <div class="modal-overlay hidden" id="versionModal" onclick="closeVersionModal(event)">
   <div class="modal">
     <div class="modal-header">
-      <div class="pdf-icon">PDF</div>
+      <div class="file-icon file-icon-pdf">PDF</div>
       <div class="modal-title" id="modalTitle">Versionen</div>
       <button class="modal-close" onclick="closeVersionModal()">✕</button>
     </div>
@@ -1318,6 +1323,13 @@ function getFileType(fileName) {
     if (def.exts.includes(ext)) return type;
   }
   return 'other';
+}
+
+function getFileIconHtml(fileName) {
+  const type = getFileType(fileName);
+  const labels = { pdf: 'PDF', xls: 'XLS', img: 'IMG', '3d': '3D', dwg: 'DWG', other: '···' };
+  const cls    = `file-icon file-icon-${type}`;
+  return `<div class="${cls}">${labels[type] || '···'}</div>`;
 }
 
 function fileMatchesActiveTypes(f) {
@@ -1919,7 +1931,7 @@ async function applyFolderFilter() {
       });
     }
 
-    setLoadingMsg(`Durchsuche ${foldersToSearch.length} Ordner nach PDFs…`);
+    setLoadingMsg(`Durchsuche ${foldersToSearch.length} Ordner…`);
     let allEntries = [];
     for (const folder of foldersToSearch) {
       const entries = await collectFiles(folder.id, folder.path);
@@ -1938,7 +1950,7 @@ async function applyFolderFilter() {
       return;
     }
 
-    setLoadingMsg(`Lade Versionsdaten für ${pdfFiles.length} Dateien…`);
+    setLoadingMsg(`Lade Versionsdaten…`);
     const step = 40 / pdfFiles.length;
     let prog = 55;
     for (const f of pdfFiles) {
@@ -2126,7 +2138,7 @@ function renderTable() {
     tr.innerHTML = `
       <td>
         <div class="name-cell">
-          <div class="pdf-icon">PDF</div>
+          ${getFileIconHtml(name)}
           <span class="file-link ${hasId ? 'clickable' : ''}"
                 title="${escHtml(name)}"
                 ${hasId ? `onclick="openFile(${idx})"` : ''}>
@@ -2319,7 +2331,7 @@ function renderSearchResults() {
     tr.innerHTML = `
       <td>
         <div class="name-cell">
-          <div class="pdf-icon">PDF</div>
+          ${getFileIconHtml(name)}
           <span class="file-link ${hasId ? 'clickable' : ''}"
                 title="${escHtml(name)}"
                 ${openCall ? `onclick="${openCall}"` : ''}>
@@ -2766,7 +2778,7 @@ async function openFolderInTrimble(folderId, pathArr) {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v69 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v70 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
