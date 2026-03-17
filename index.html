@@ -900,6 +900,68 @@
     .dot.error { background: var(--danger); }
     @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
 
+    /* ── Dateiart-Filter ── */
+    .filetype-panel {
+      border-top: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .filetype-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--border);
+    }
+    .filetype-title {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .06em;
+    }
+    .filetype-body {
+      padding: 6px 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .filetype-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 4px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: background .1s;
+      font-size: 11px;
+      color: var(--text);
+      user-select: none;
+    }
+    .filetype-row:hover { background: var(--row-hover); }
+    .filetype-check {
+      width: 13px; height: 13px;
+      border: 1.5px solid var(--border);
+      border-radius: 3px;
+      flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      transition: all .15s;
+    }
+    .filetype-row.active .filetype-check {
+      background: var(--accent);
+      border-color: var(--accent);
+    }
+    .filetype-check svg { width: 8px; height: 8px; fill: #000; }
+    .filetype-badge {
+      margin-left: auto;
+      font-family: var(--font);
+      font-size: 10px;
+      color: var(--muted);
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1px 6px;
+    }
+
     /* ── Scope-Toggle ── */
     .scope-toggle {
       display: flex;
@@ -997,7 +1059,7 @@
 <div class="state-overlay" id="stateEmpty" style="display:none">
   <div class="error-icon">📂</div>
   <div class="state-title">Keine PDF-Dateien gefunden</div>
-  <div class="state-sub">Im Explorer dieses Projekts sind keine PDF-Dokumente vorhanden.</div>
+  <div class="state-sub">Im gewählten Ordner wurden keine Dateien der ausgewählten Dateiarten gefunden.</div>
 </div>
 
 <!-- Split layout: folder tree + table + preview -->
@@ -1016,6 +1078,45 @@
     <div class="tree-loading">
       <div class="tree-spinner"></div>
       Lade Ordner…
+    </div>
+  </div>
+
+  <!-- Dateiart-Filter -->
+  <div class="filetype-panel">
+    <div class="filetype-header">
+      <span class="filetype-title">Dateiarten</span>
+    </div>
+    <div class="filetype-body" id="filetypeBody">
+      <div class="filetype-row active" data-type="pdf" onclick="toggleFileType('pdf')">
+        <div class="filetype-check"><svg viewBox="0 0 12 12"><path d="M2 6l3 3 5-5" stroke="#000" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        <span>PDF</span>
+        <span class="filetype-badge" id="badge-pdf">–</span>
+      </div>
+      <div class="filetype-row" data-type="dwg" onclick="toggleFileType('dwg')">
+        <div class="filetype-check"><svg viewBox="0 0 12 12"><path d="M2 6l3 3 5-5" stroke="#000" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        <span>DWG / DXF</span>
+        <span class="filetype-badge" id="badge-dwg">–</span>
+      </div>
+      <div class="filetype-row" data-type="3d" onclick="toggleFileType('3d')">
+        <div class="filetype-check"><svg viewBox="0 0 12 12"><path d="M2 6l3 3 5-5" stroke="#000" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        <span>3D (STP / IFC / IGES)</span>
+        <span class="filetype-badge" id="badge-3d">–</span>
+      </div>
+      <div class="filetype-row" data-type="img" onclick="toggleFileType('img')">
+        <div class="filetype-check"><svg viewBox="0 0 12 12"><path d="M2 6l3 3 5-5" stroke="#000" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        <span>Bilder</span>
+        <span class="filetype-badge" id="badge-img">–</span>
+      </div>
+      <div class="filetype-row" data-type="xls" onclick="toggleFileType('xls')">
+        <div class="filetype-check"><svg viewBox="0 0 12 12"><path d="M2 6l3 3 5-5" stroke="#000" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        <span>Excel (XLS / XLSX)</span>
+        <span class="filetype-badge" id="badge-xls">–</span>
+      </div>
+      <div class="filetype-row" data-type="other" onclick="toggleFileType('other')">
+        <div class="filetype-check"><svg viewBox="0 0 12 12"><path d="M2 6l3 3 5-5" stroke="#000" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        <span>Sonstige</span>
+        <span class="filetype-badge" id="badge-other">–</span>
+      </div>
     </div>
   </div>
 </div>
@@ -1109,6 +1210,20 @@ let rootFolderId = null;
 let tcApiBase = null;
 let allFiles  = []; // aktuell angezeigte Dateien (wird durch Suche NICHT verändert)
 let baseFiles = []; // unveränderliche Kopie der per "Anwenden" geladenen Dateien
+
+// ─────────────────────────────────────────
+//  Dateiart-Definitionen
+// ─────────────────────────────────────────
+const FILE_TYPES = {
+  pdf:   { exts: ['pdf'] },
+  dwg:   { exts: ['dwg', 'dxf'] },
+  '3d':  { exts: ['stp', 'step', 'ifc', 'iges', 'igs', 'obj', 'fbx', 'nwc', 'nwd', 'rvt', 'skp'] },
+  img:   { exts: ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'tiff', 'tif', 'webp', 'svg', 'heic', 'heif'] },
+  xls:   { exts: ['xls', 'xlsx', 'xlsm', 'xlsb', 'csv', 'ods'] },
+  other: { exts: [] } // alle übrigen
+};
+// Aktive Filter — initial nur PDF
+let activeFileTypes = new Set(['pdf']);
 let sortKey = 'name';
 let sortAsc = true;
 let selectedPaths = new Set(); // leeres Set = alle anzeigen
@@ -1193,7 +1308,56 @@ async function tcGet(path) {
   return res.json();
 }
 
-/** Recursively collect all files via GET /folders/{id}/items */
+// ─────────────────────────────────────────
+//  Dateiart-Filter Funktionen
+// ─────────────────────────────────────────
+function getFileType(fileName) {
+  const ext = (fileName || '').split('.').pop().toLowerCase();
+  for (const [type, def] of Object.entries(FILE_TYPES)) {
+    if (type === 'other') continue;
+    if (def.exts.includes(ext)) return type;
+  }
+  return 'other';
+}
+
+function fileMatchesActiveTypes(f) {
+  if (activeFileTypes.size === 0) return true;
+  return activeFileTypes.has(getFileType(f.name));
+}
+
+function toggleFileType(type) {
+  if (activeFileTypes.has(type)) {
+    // Mindestens einen aktiv lassen
+    if (activeFileTypes.size > 1) activeFileTypes.delete(type);
+  } else {
+    activeFileTypes.add(type);
+  }
+  updateFileTypeUI();
+  renderTable();
+}
+
+function updateFileTypeUI() {
+  document.querySelectorAll('.filetype-row').forEach(row => {
+    const type = row.dataset.type;
+    row.classList.toggle('active', activeFileTypes.has(type));
+  });
+}
+
+function updateFileTypeBadges(files) {
+  // Zähle Dateien pro Typ aus dem gesamten baseFiles-Pool
+  const counts = { pdf: 0, dwg: 0, '3d': 0, img: 0, xls: 0, other: 0 };
+  for (const f of files) {
+    const t = getFileType(f.name);
+    if (counts[t] !== undefined) counts[t]++;
+    else counts.other++;
+  }
+  for (const [type, count] of Object.entries(counts)) {
+    const badge = document.getElementById(`badge-${type}`);
+    if (badge) badge.textContent = count || '0';
+  }
+}
+
+
 async function collectFiles(folderId, folderPath, depth = 0, signal = null) {
   if (depth > 25) return [];
   if (signal?.aborted) return [];
@@ -1321,14 +1485,43 @@ async function openPreview(idx) {
   document.getElementById('zoomToolbar').style.display = 'none';
 
   const versionId = f.versionId || f.id;
+  const fileType  = getFileType(f.name);
+
+  // Für XLS und Sonstige: kein Vorschau-Viewer
+  if (fileType === 'xls' || fileType === 'other') {
+    panel.classList.add('open');
+    document.getElementById('previewResizeHandle').style.display = 'block';
+    body.innerHTML = `<div class="preview-placeholder">
+      <svg viewBox="0 0 24 24" width="48" height="48"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6zm-1 1.5L18.5 9H13V3.5zM8 13h8v1H8v-1zm0 3h8v1H8v-1zm0-6h4v1H8v-1z" fill="currentColor"/></svg>
+      <div style="font-size:13px">${escHtml(f.name || '')}</div>
+      <div style="font-size:11px;margin-top:4px">Kein Vorschau-Viewer verfügbar</div>
+      <button class="btn primary" style="margin-top:12px" onclick="downloadFile(${idx})">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M5 20h14v-2H5v2zm7-14v8.17l-2.59-2.58L8 13l4 4 4-4-1.41-1.41L13 14.17V6h-1z"/></svg>
+        Herunterladen
+      </button>
+    </div>`;
+    try {
+      const size  = f.size ? formatSize(f.size) : '–';
+      const modAt = formatDate(getModifiedAt(f));
+      const modBy = getModifiedBy(f);
+      metaEl.innerHTML = `<div>Größe: <span>${size}</span></div><div>Geändert: <span>${modAt}</span></div><div>Von: <span>${escHtml(modBy)}</span></div>`;
+      metaEl.style.display = 'flex';
+    } catch (_) {}
+    return;
+  }
 
   try {
     const persistentId = f._persistentFileId || await getPersistentFileId(versionId);
     if (persistentId) f._persistentFileId = persistentId;
 
-    const viewerUrl = persistentId
-      ? `https://web.connect.trimble.com/projects/${projectId}/viewer/2D?id=${persistentId}&version=${versionId}&type=revisions&etag=${versionId}&isEmbedded=true`
-      : `https://web.connect.trimble.com/projects/${projectId}/viewer/2D?id=${versionId}&version=${versionId}&type=revisions&etag=${versionId}&isEmbedded=true`;
+    // Viewer-Typ je nach Dateiart: 3D für STP/IFC/IGES, 2D für alles andere
+    const viewerType = fileType === '3d' ? '3D' : '2D';
+    const viewerPath = fileType === '3d' ? 'viewer/3d' : 'viewer/2D';
+    const viewerParams = fileType === '3d'
+      ? `projectId=${projectId}&modelId=${persistentId || versionId}&versionId=${versionId}&isEmbedded=true`
+      : `id=${persistentId || versionId}&version=${versionId}&type=revisions&etag=${versionId}&isEmbedded=true`;
+
+    const viewerUrl = `https://web.connect.trimble.com/projects/${projectId}/${viewerPath}?${viewerParams}`;
 
     previewBaseUrl = viewerUrl;
 
@@ -1536,14 +1729,17 @@ async function openFile(idx, explicitVersionId) {
   if (persistentId) f._persistentFileId = persistentId;
 
   let url;
-  if (persistentId) {
-    // Korrekte URL mit persistenter ID + versionId
+  const fileType = getFileType(f.name);
+  if (fileType === '3d') {
+    // 3D-Viewer
+    const modelId = persistentId || versionId;
+    url = `https://web.connect.trimble.com/projects/${projectId}/viewer/3d?projectId=${projectId}&modelId=${modelId}&versionId=${versionId}`;
+  } else if (persistentId) {
     url = `https://web.connect.trimble.com/projects/${projectId}/viewer/2D?id=${persistentId}&version=${versionId}&type=revisions&etag=${versionId}`;
   } else {
-    // Fallback: nur versionId (öffnet leider "Keine Vorschau")
     url = `https://web.connect.trimble.com/projects/${projectId}/viewer/2D?id=${versionId}&version=${versionId}&type=revisions&etag=${versionId}`;
   }
-  console.log('[S+L Explorer] Öffne:', f.name, '| persistentId:', persistentId, '| versionId:', versionId);
+  console.log('[S+L Explorer] Öffne:', f.name, '| Typ:', fileType, '| persistentId:', persistentId);
   window.open(url, '_blank');
 }
 
@@ -1731,17 +1927,18 @@ async function applyFolderFilter() {
     }
     setProgress(55);
 
-    const pdfFiles = allEntries.filter(f => (f.name || '').toLowerCase().endsWith('.pdf'));
+    // Alle Dateien — Filter passiert beim Rendern
+    const pdfFiles = allEntries.filter(f => (f.name || '').trim() !== '');
 
     if (pdfFiles.length === 0) {
       setProgress(100);
       showState('empty');
-      setStatus('ok', 'Keine PDF-Dateien gefunden');
+      setStatus('ok', 'Keine Dateien gefunden');
       if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
       return;
     }
 
-    setLoadingMsg(`Lade Versionsdaten für ${pdfFiles.length} PDFs…`);
+    setLoadingMsg(`Lade Versionsdaten für ${pdfFiles.length} Dateien…`);
     const step = 40 / pdfFiles.length;
     let prog = 55;
     for (const f of pdfFiles) {
@@ -1754,11 +1951,12 @@ async function applyFolderFilter() {
     baseFiles = [...pdfFiles]; // unveränderliche Kopie sichern
     selectedPaths.clear();
     setProgress(100);
+    updateFileTypeBadges(baseFiles);
     buildPathDropdown();
     renderTable();
     showState('table');
     document.getElementById('totalCount').textContent = allFiles.length;
-    setStatus('ok', `${allFiles.length} PDF-Dateien geladen`);
+    setStatus('ok', `${allFiles.length} Dateien geladen`);
   } catch (err) {
     console.error(err);
     document.getElementById('errorMessage').textContent = err.message || String(err);
@@ -1884,11 +2082,15 @@ function renderTable() {
   const query = (document.getElementById('searchInput')?.value || '').toLowerCase();
 
   let data = allFiles.filter(f => {
+    // Dateiart-Filter
+    if (!fileMatchesActiveTypes(f)) return false;
+    // Textsuche
     if (query) {
       const name = (f.name || '').toLowerCase();
       const path = (f._path || '').toLowerCase();
       if (!name.includes(query) && !path.includes(query)) return false;
     }
+    // Pfadfilter
     if (selectedPaths.size > 0) {
       const path = f._path || '/';
       if (!selectedPaths.has(path)) return false;
@@ -2042,13 +2244,15 @@ async function searchEntireProject(query) {
 
     if (signal.aborted) return;
 
-    const pdfFiles = allEntries.filter(f => (f.name || '').toLowerCase().endsWith('.pdf'));
+    // Alle Dateien — kein PDF-Vorfilter mehr
+    const allFileEntries = allEntries.filter(f => (f.name || '').trim() !== '');
 
-    // Filter: Treffer nach Name oder Pfad
-    const matched = pdfFiles.filter(f => {
+    // Filter: Treffer nach Name oder Pfad, UND aktive Dateiarten
+    const matched = allFileEntries.filter(f => {
       const n = (f.name || '').toLowerCase();
       const p = (f._path || '').toLowerCase();
-      return n.includes(query) || p.includes(query);
+      const nameMatch = n.includes(query) || p.includes(query);
+      return nameMatch && fileMatchesActiveTypes(f);
     });
 
     if (signal.aborted) return;
@@ -2562,7 +2766,7 @@ async function openFolderInTrimble(folderId, pathArr) {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v68 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v69 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
