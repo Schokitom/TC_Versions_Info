@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>S+L Explorer</title>
   <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -846,6 +848,84 @@
     .dot.loading { background: var(--warning); animation: pulse .8s ease-in-out infinite; }
     .dot.error { background: var(--danger); }
     @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+    /* ── Volltext-Suche ── */
+    .fulltext-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 20px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(0,194,255,.04);
+      flex-shrink: 0;
+    }
+    .fulltext-wrap {
+      flex: 1;
+      position: relative;
+    }
+    .fulltext-wrap svg {
+      position: absolute;
+      left: 10px; top: 50%;
+      transform: translateY(-50%);
+      width: 15px; height: 15px;
+      fill: var(--accent);
+      opacity: .7;
+    }
+    #fulltextInput {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--accent2);
+      border-radius: 6px;
+      padding: 7px 10px 7px 32px;
+      font-size: 13px;
+      color: var(--text);
+      font-family: var(--font-ui);
+      outline: none;
+      transition: border-color .2s;
+    }
+    #fulltextInput:focus { border-color: var(--accent); }
+    #fulltextInput::placeholder { color: var(--muted); }
+    .fulltext-status {
+      font-size: 11px;
+      color: var(--muted);
+      white-space: nowrap;
+      min-width: 120px;
+    }
+    .fulltext-status.searching { color: var(--warning); }
+    .fulltext-status.done { color: var(--success); }
+    .fulltext-progress {
+      height: 3px;
+      background: var(--border);
+      border-radius: 2px;
+      overflow: hidden;
+      width: 80px;
+      flex-shrink: 0;
+    }
+    .fulltext-progress-bar {
+      height: 100%;
+      background: var(--accent);
+      width: 0%;
+      transition: width .2s ease;
+      border-radius: 2px;
+    }
+    /* Treffer in der Tabelle */
+    tr.ft-match { background: rgba(0,194,255,.07) !important; }
+    tr.ft-no-match { opacity: .35; }
+    .ft-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      background: rgba(0,194,255,.15);
+      border: 1px solid var(--accent2);
+      border-radius: 10px;
+      padding: 1px 7px;
+      font-size: 10px;
+      font-family: var(--font);
+      color: var(--accent);
+      margin-left: 6px;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .ft-badge svg { width: 9px; height: 9px; fill: currentColor; }
   </style>
 </head>
 <body>
@@ -896,6 +976,25 @@
   <button class="btn primary" onclick="loadFiles()">
     <svg viewBox="0 0 24 24"><path d="M17.65 6.35A7.958 7.958 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
     Aktualisieren
+  </button>
+</div>
+
+<!-- Volltext-Suchleiste -->
+<div class="fulltext-bar" id="fulltextBar" style="display:none">
+  <div class="fulltext-wrap">
+    <svg viewBox="0 0 24 24"><path d="M9 3C5.13 3 2 6.13 2 10s3.13 7 7 7a6.96 6.96 0 004.33-1.5l5.08 5.08 1.42-1.42-5.08-5.08A6.96 6.96 0 0016 10c0-3.87-3.13-7-7-7zm0 2a5 5 0 010 10A5 5 0 019 5zm-.5 2v3.5H5v1h3.5V15h1v-3.5H13v-1H9.5V7h-1z"/></svg>
+    <input type="text" id="fulltextInput"
+           placeholder="PDF-Volltext durchsuchen… (Enter zum Starten)"
+           onkeydown="if(event.key==='Enter') startFulltextSearch()"
+           oninput="onFulltextInput()" />
+  </div>
+  <div class="fulltext-progress" id="ftProgress" style="display:none">
+    <div class="fulltext-progress-bar" id="ftProgressBar"></div>
+  </div>
+  <span class="fulltext-status" id="ftStatus">Enter drücken zum Suchen</span>
+  <button class="btn" onclick="clearFulltextSearch()" id="ftClearBtn" style="display:none;padding:5px 10px">
+    <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+    Zurücksetzen
   </button>
 </div>
 
@@ -1021,6 +1120,16 @@
   <span>Trimble Connect · S+L Explorer</span>
 </footer>
 
+<!-- PDF.js für Volltext-Extraktion -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+  // PDF.js Worker konfigurieren
+  if (typeof pdfjsLib !== 'undefined') {
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  }
+</script>
+
 <script>
 // ─────────────────────────────────────────
 //  State
@@ -1034,6 +1143,7 @@ let allFiles = [];
 let sortKey = 'name';
 let sortAsc = true;
 let selectedPaths = new Set(); // leeres Set = alle anzeigen
+
 
 // ─────────────────────────────────────────
 //  Trimble Connect REST helpers
@@ -1817,6 +1927,9 @@ function renderTable() {
   const tbody = document.getElementById('tableBody');
   tbody.innerHTML = '';
 
+  // Volltext-Suche aktiv? → Map-basiertes Format
+  const ftSearchDone = ftActive && ftResults.size > 0;
+
   for (const f of data) {
     const name     = f.name || '–';
     const modBy    = getModifiedBy(f);
@@ -1825,13 +1938,33 @@ function renderTable() {
     const path     = f._path || '/';
     const initials = modBy.split(/[\s.@]+/).map(n => n[0]).filter(Boolean).join('').toUpperCase().slice(0, 2) || '?';
 
-    // Store full object reference by index for openFile()
-    const idx = allFiles.indexOf(f);
+    const idx    = allFiles.indexOf(f);
+    const fileId = getFileId(f);
+    const hasId  = !!fileId;
 
-    const fileId    = getFileId(f);
-    const hasId     = !!fileId;
+    // Volltext-Treffer für diese Datei (Map: fileId → result)
+    const ftKey = f.id || f.versionId;
+    const ftHit = ftActive ? ftResults.get(ftKey) : undefined;
+    const isFtMatch   = !!ftHit;
+    // Wenn Suche aktiv aber keine Treffer → ausblenden
+    const isFtNoMatch = ftActive && ftResults.size > 0 && !ftHit;
+
+    // Treffer-Badge bauen
+    let ftBadgeHtml = '';
+    if (isFtMatch && ftHit.pages.length > 0) {
+      const pages = ftHit.pages.slice(0, 5).map(p => `S.${p}`).join(', ');
+      const more  = ftHit.pages.length > 5 ? ` +${ftHit.pages.length - 5}` : '';
+      const tip   = ftHit.snippets?.[0] || '';
+      ftBadgeHtml = `<span class="ft-badge" title="${escHtml(tip)}">
+        <svg viewBox="0 0 24 24"><path d="M9 3C5.13 3 2 6.13 2 10s3.13 7 7 7a6.96 6.96 0 004.33-1.5l5.08 5.08 1.42-1.42-5.08-5.08A6.96 6.96 0 0016 10c0-3.87-3.13-7-7-7zm0 2a5 5 0 010 10A5 5 0 019 5z"/></svg>
+        ${ftHit.pages.length}× ${pages}${more}
+      </span>`;
+    }
 
     const tr = document.createElement('tr');
+    if (isFtMatch)   tr.classList.add('ft-match');
+    if (isFtNoMatch) tr.classList.add('ft-no-match');
+
     tr.innerHTML = `
       <td>
         <div class="name-cell">
@@ -1841,6 +1974,7 @@ function renderTable() {
                 ${hasId ? `onclick="openFile(${idx})"` : ''}>
             ${escHtml(name)}
           </span>
+          ${ftBadgeHtml}
           <button class="open-btn"
                   ${hasId ? `onclick="openFile(${idx})"` : 'disabled style="opacity:.3;cursor:default"'}
                   title="Im Trimble Viewer öffnen">
@@ -1903,6 +2037,159 @@ function sortTable(key) {
 }
 
 function filterTable() { renderTable(); }
+
+// ─────────────────────────────────────────
+//  PDF Volltext-Suche (PDF.js)
+// ─────────────────────────────────────────
+
+function onFulltextInput() {
+  const val = document.getElementById('fulltextInput').value.trim();
+  if (!val && ftActive) clearFulltextSearch();
+}
+
+async function startFulltextSearch() {
+  const query = document.getElementById('fulltextInput').value.trim().toLowerCase();
+  if (!query || ftSearching) return;
+  if (!allFiles.length) return;
+
+  if (typeof pdfjsLib === 'undefined') {
+    alert('PDF.js konnte nicht geladen werden. Bitte Internetverbindung prüfen.');
+    return;
+  }
+
+  ftSearching = true;
+  ftActive    = true;
+  ftResults   = new Map();
+
+  const statusEl  = document.getElementById('ftStatus');
+  const progressEl = document.getElementById('ftProgress');
+  const barEl     = document.getElementById('ftProgressBar');
+  const clearBtn  = document.getElementById('ftClearBtn');
+
+  statusEl.className  = 'fulltext-status searching';
+  statusEl.textContent = `Durchsuche 0 / ${allFiles.length}…`;
+  progressEl.style.display = 'block';
+  barEl.style.width = '0%';
+  clearBtn.style.display = 'none';
+
+  // Nur aktuell sichtbare (nicht gefilterte) Dateien durchsuchen
+  const filesToSearch = allFiles.filter(f => {
+    if (selectedPaths.size > 0 && !selectedPaths.has(f._path || '/')) return false;
+    const nameQuery = (document.getElementById('searchInput')?.value || '').toLowerCase();
+    if (nameQuery) {
+      const name = (f.name || '').toLowerCase();
+      const path = (f._path || '').toLowerCase();
+      if (!name.includes(nameQuery) && !path.includes(nameQuery)) return false;
+    }
+    return true;
+  });
+
+  statusEl.textContent = `Durchsuche 0 / ${filesToSearch.length}…`;
+
+  for (let i = 0; i < filesToSearch.length; i++) {
+    const f = filesToSearch[i];
+    const versionId = f.versionId || f.id;
+
+    try {
+      // PDF als ArrayBuffer laden (mit Auth-Header)
+      const resp = await fetch(`${tcApiBase}/files/${versionId}/download`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        redirect: 'follow'
+      });
+
+      let pdfData = null;
+      if (resp.ok || resp.redirected) {
+        // Falls redirect → fetch final URL
+        const finalResp = resp.redirected
+          ? await fetch(resp.url)
+          : resp;
+        if (finalResp.ok) {
+          pdfData = await finalResp.arrayBuffer();
+        }
+      }
+
+      if (!pdfData) {
+        // Fallback: direkt mit Auth laden
+        const r2 = await fetch(`${tcApiBase}/files/${versionId}/download`, {
+          headers: { Authorization: `Bearer ${accessToken}` }
+        });
+        if (r2.ok) pdfData = await r2.arrayBuffer();
+      }
+
+      if (pdfData) {
+        const result = await extractTextFromPDF(pdfData, query);
+        if (result.found) {
+          ftResults.set(f.id || f.versionId, result);
+        }
+      }
+    } catch (e) {
+      console.warn('[S+L Explorer] Volltext-Fehler für', f.name, ':', e.message);
+    }
+
+    const pct = Math.round(((i + 1) / filesToSearch.length) * 100);
+    barEl.style.width = pct + '%';
+    statusEl.textContent = `Durchsuche ${i + 1} / ${filesToSearch.length}…`;
+  }
+
+  ftSearching = false;
+  const found = ftResults.size;
+  statusEl.className  = 'fulltext-status done';
+  statusEl.textContent = found > 0
+    ? `${found} Treffer in ${found} Datei${found !== 1 ? 'en' : ''}`
+    : 'Keine Treffer gefunden';
+  clearBtn.style.display = 'flex';
+  progressEl.style.display = 'none';
+
+  renderTable(); // Tabelle mit Treffern neu aufbauen
+}
+
+/**
+ * Extrahiert Text aus einem PDF ArrayBuffer via PDF.js
+ * und sucht nach dem query-String.
+ */
+async function extractTextFromPDF(arrayBuffer, query) {
+  const result = { found: false, pages: [], snippets: [] };
+  try {
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    for (let p = 1; p <= pdf.numPages; p++) {
+      const page    = await pdf.getPage(p);
+      const content = await page.getTextContent();
+      const text    = content.items.map(item => item.str).join(' ').toLowerCase();
+      if (text.includes(query)) {
+        result.found = true;
+        result.pages.push(p);
+        // Snippet: 80 Zeichen um den Treffer herum
+        const idx = text.indexOf(query);
+        const start = Math.max(0, idx - 40);
+        const end   = Math.min(text.length, idx + query.length + 40);
+        const snippet = '…' + text.slice(start, end).replace(
+          query,
+          `**${query}**`
+        ) + '…';
+        result.snippets.push(snippet);
+        if (result.snippets.length >= 3) break; // max 3 Snippets pro Datei
+      }
+    }
+  } catch (e) {
+    console.warn('[S+L Explorer] PDF.js Fehler:', e.message);
+  }
+  return result;
+}
+
+function clearFulltextSearch() {
+  ftActive    = false;
+  ftResults   = new Map();
+  ftSearching = false;
+  document.getElementById('fulltextInput').value = '';
+  document.getElementById('ftStatus').className  = 'fulltext-status';
+  document.getElementById('ftStatus').textContent = 'Enter drücken zum Suchen';
+  document.getElementById('ftClearBtn').style.display  = 'none';
+  document.getElementById('ftProgress').style.display  = 'none';
+  document.getElementById('ftProgressBar').style.width = '0%';
+  renderTable();
+}
+
+
 
 // ─────────────────────────────────────────
 //  Path dropdown
@@ -2105,6 +2392,7 @@ function showState(s) {
   document.getElementById('stateError').style.display   = s === 'error'   ? 'flex' : 'none';
   document.getElementById('stateEmpty').style.display   = s === 'empty'   ? 'flex' : 'none';
   document.getElementById('tableWrap').style.display    = s === 'table'   ? 'block': 'none';
+  document.getElementById('fulltextBar').style.display  = s === 'table'   ? 'flex' : 'none';
   // tree panel always visible after initial load
   const split = document.querySelector('.content-split');
   if (split) split.style.display = (s === 'loading' && !folderTree) ? 'none' : 'flex';
@@ -2140,8 +2428,7 @@ function escHtml(str) {
   return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-// ─────────────────────────────────────────
-//  Trimble Workspace API init
+
 // ─────────────────────────────────────────
 (async () => {
   try {
@@ -2177,7 +2464,7 @@ function escHtml(str) {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v32 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v33 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
