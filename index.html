@@ -1235,30 +1235,52 @@ async function tcGetBuffer(path) {
   const fileId = match ? match[1] : null;
   if (!fileId) return null;
 
-  // Cloudflare Worker Proxy — umgeht CORS-Beschränkung
   const PROXY_URL = 'https://slproxy.schoknechtthomas.workers.dev';
 
+  // ── Strategie 1: Browser Cache Storage (Trimble SW cached PDFs) ──────────
+  try {
+    const cacheNames = await caches.keys();
+    for (const name of cacheNames) {
+      const cache = await caches.open(name);
+      const keys  = await cache.keys();
+      for (const req of keys) {
+        // Trimble cached die PDFs unter der Download-URL
+        if (req.url.includes(fileId)) {
+          const cached = await cache.match(req);
+          if (cached && cached.ok) {
+            const buf = await cached.arrayBuffer();
+            if (buf.byteLength > 0) {
+              console.log('[S+L Explorer] PDF aus Cache geladen:', fileId, buf.byteLength, 'bytes');
+              return buf;
+            }
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[S+L Explorer] Cache-Zugriff fehlgeschlagen:', e.message);
+  }
+
+  // ── Strategie 2: Cloudflare Proxy ────────────────────────────────────────
   try {
     const resp = await fetch(PROXY_URL + '/pdf', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        token:   accessToken,
-        fileId:  fileId,
-        apiBase: tcApiBase,
-      }),
+      body: JSON.stringify({ token: accessToken, fileId, apiBase: tcApiBase }),
     });
-
     if (resp.ok) {
       const buf = await resp.arrayBuffer();
-      if (buf.byteLength > 0) return buf;
+      if (buf.byteLength > 0) {
+        console.log('[S+L Explorer] PDF via Proxy geladen:', fileId, buf.byteLength, 'bytes');
+        return buf;
+      }
     }
     console.warn('[S+L Explorer] Proxy-Antwort:', resp.status, resp.statusText);
-    return null;
   } catch (e) {
     console.warn('[S+L Explorer] Proxy-Fehler:', e.message);
-    return null;
   }
+
+  return null;
 }
 
 /** Recursively collect all files via GET /folders/{id}/items */
@@ -2148,11 +2170,19 @@ async function startFulltextSearch() {
 
   ftActive = false;
   barEl.style.width = '100%';
-  const matchCount = Object.values(ftResults).filter(v => v && v.count > 0).length;
-  statusEl.className   = 'fulltext-status done';
-  statusEl.textContent = ftAbort
-    ? 'Abgebrochen'
-    : `${matchCount} von ${total} PDFs enthalten "${query}"`;
+  const matchCount  = Object.values(ftResults).filter(v => v && v.count > 0).length;
+  const loadedCount = Object.values(ftResults).filter(v => v !== undefined).length;
+  const missCount   = total - loadedCount;
+
+  statusEl.className = 'fulltext-status done';
+  if (ftAbort) {
+    statusEl.textContent = 'Abgebrochen';
+  } else if (loadedCount === 0) {
+    statusEl.textContent = `⚠ Keine PDFs ladbar — PDFs zuerst im Viewer öffnen, dann erneut suchen`;
+  } else {
+    statusEl.textContent = `${matchCount} Treffer in ${loadedCount} PDFs` +
+      (missCount > 0 ? ` (${missCount} nicht ladbar)` : '');
+  }
   clearBtn.style.display = 'flex';
   setTimeout(() => { progressEl.style.display = 'none'; }, 800);
   renderTable();
@@ -2479,7 +2509,7 @@ function escHtml(str) {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v40 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v41 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
