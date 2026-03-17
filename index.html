@@ -1240,7 +1240,7 @@ async function tcGetBuffer(path) {
   const PROXY_URL = 'https://slproxy.schoknechtthomas.workers.dev';
 
   try {
-    const resp = await fetch(PROXY_URL, {
+    const resp = await fetch(PROXY_URL + '/pdf', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -2483,7 +2483,7 @@ function escHtml(str) {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v38 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v39 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
