@@ -2053,7 +2053,8 @@ function onFulltextInput() {
 
 async function startFulltextSearch() {
   const query = document.getElementById('fulltextInput').value.trim().toLowerCase();
-  if (!query || ftSearching) return;
+  if (!query) return;
+  if (ftActive) { ftAbort = true; await new Promise(r => setTimeout(r, 150)); }
   if (!allFiles.length) return;
 
   if (typeof pdfjsLib === 'undefined') {
@@ -2061,7 +2062,7 @@ async function startFulltextSearch() {
     return;
   }
 
-  ftSearching = true;
+  ftActive = true; ftAbort = false;
   ftActive    = true;
   ftResults   = new Map();
 
@@ -2135,7 +2136,7 @@ async function startFulltextSearch() {
     statusEl.textContent = `Durchsuche ${i + 1} / ${filesToSearch.length}…`;
   }
 
-  ftSearching = false;
+  ftActive = false;
   const found = ftResults.size;
   statusEl.className  = 'fulltext-status done';
   statusEl.textContent = found > 0
@@ -2183,7 +2184,7 @@ async function extractTextFromPDF(arrayBuffer, query) {
 function clearFulltextSearch() {
   ftActive    = false;
   ftResults   = new Map();
-  ftSearching = false;
+  ftActive = false;
   document.getElementById('fulltextInput').value = '';
   document.getElementById('ftStatus').className  = 'fulltext-status';
   document.getElementById('ftStatus').textContent = 'Enter drücken zum Suchen';
@@ -2468,7 +2469,7 @@ function escHtml(str) {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v34 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v35 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
