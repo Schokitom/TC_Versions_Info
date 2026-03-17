@@ -6,7 +6,6 @@
   <title>S+L Explorer</title>
   <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -1120,14 +1119,14 @@
   <span>Trimble Connect · S+L Explorer</span>
 </footer>
 
-<!-- PDF.js für Volltext-Extraktion -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<!-- PDF.js Worker konfigurieren (einmalig) -->
 <script>
-  // PDF.js Worker konfigurieren
-  if (typeof pdfjsLib !== 'undefined') {
-    pdfjsLib.GlobalWorkerOptions.workerSrc =
-      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-  }
+  document.addEventListener('DOMContentLoaded', () => {
+    if (typeof pdfjsLib !== 'undefined') {
+      pdfjsLib.GlobalWorkerOptions.workerSrc =
+        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    }
+  });
 </script>
 
 <script>
@@ -1388,9 +1387,6 @@ async function openPreview(idx) {
   document.getElementById('zoomToolbar').style.display = 'none';
 
   const versionId = f.versionId || f.id;
-
-  // Proxy-URL für scharfe PDF-Vorschau
-  const PROXY = 'https://slproxy.schoknechtthomas.workers.dev';
 
   try {
     // Trimble 2D Viewer direkt im iframe einbetten
@@ -2483,7 +2479,7 @@ function escHtml(str) {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v39 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v40 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
