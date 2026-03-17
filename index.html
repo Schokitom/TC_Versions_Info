@@ -448,6 +448,7 @@
     .prev-btn:hover, .prev-btn.active { border-color: var(--accent); color: var(--accent); background: var(--row-hover); }
     .prev-btn svg { width: 14px; height: 14px; fill: currentColor; display: block; }
 
+
     table {
       width: 100%;
       border-collapse: collapse;
@@ -897,11 +898,6 @@
     Aktualisieren
   </button>
 </div>
-  </div>
-    <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
-    Zurücksetzen
-  </button>
-</div>
 
 <!-- Loading state -->
 <div class="state-overlay" id="stateLoading">
@@ -929,7 +925,7 @@
 </div>
 
 <!-- Split layout: folder tree + table + preview -->
-<div class="content-split" style="display:none">
+<div class="content-split">
 
 <!-- Folder Tree Panel -->
 <div class="tree-panel" id="treePanel">
@@ -1245,6 +1241,9 @@ async function openPreview(idx) {
   document.getElementById('zoomToolbar').style.display = 'none';
 
   const versionId = f.versionId || f.id;
+
+  // Proxy-URL für scharfe PDF-Vorschau
+  const PROXY = 'https://slproxy.schoknechtthomas.workers.dev';
 
   try {
     // Trimble 2D Viewer direkt im iframe einbetten
@@ -1825,9 +1824,12 @@ function renderTable() {
     const versions = f._versionCount || 1;
     const path     = f._path || '/';
     const initials = modBy.split(/[\s.@]+/).map(n => n[0]).filter(Boolean).join('').toUpperCase().slice(0, 2) || '?';
-    const idx      = allFiles.indexOf(f);
-    const fileId   = getFileId(f);
-    const hasId    = !!fileId;
+
+    // Store full object reference by index for openFile()
+    const idx = allFiles.indexOf(f);
+
+    const fileId    = getFileId(f);
+    const hasId     = !!fileId;
 
     const tr = document.createElement('tr');
     tr.innerHTML = `
@@ -2139,6 +2141,8 @@ function escHtml(str) {
 }
 
 // ─────────────────────────────────────────
+//  Trimble Workspace API init
+// ─────────────────────────────────────────
 (async () => {
   try {
     API = await TrimbleConnectWorkspace.connect(
@@ -2173,7 +2177,7 @@ function escHtml(str) {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v44 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v32 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
