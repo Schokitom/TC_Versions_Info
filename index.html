@@ -1229,15 +1229,37 @@ async function tcGet(path) {
   return res.json();
 }
 
-/** Lädt eine Ressource als ArrayBuffer (für PDF-Volltext-Suche) */
+/** Lädt eine PDF-Datei als ArrayBuffer über den CORS-Proxy (Cloudflare Worker) */
 async function tcGetBuffer(path) {
-  const res = await fetch(`${tcApiBase}${path}`, {
-    headers: { Authorization: `Bearer ${accessToken}` }
-  });
-  // /download gibt 302 zurück → Browser folgt automatisch bei fetch mit redirect:'follow'
-  if (res.ok) return res.arrayBuffer();
-  // Wenn CORS blockiert wird (z.B. nach Redirect auf S3), null zurückgeben
-  return null;
+  // Datei-ID aus dem Pfad extrahieren: /files/{id}/download
+  const match = path.match(/\/files\/([^/]+)\/download/);
+  const fileId = match ? match[1] : null;
+  if (!fileId) return null;
+
+  // Cloudflare Worker Proxy — umgeht CORS-Beschränkung
+  const PROXY_URL = 'https://slproxy.schoknechtthomas.workers.dev';
+
+  try {
+    const resp = await fetch(PROXY_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        token:   accessToken,
+        fileId:  fileId,
+        apiBase: tcApiBase,
+      }),
+    });
+
+    if (resp.ok) {
+      const buf = await resp.arrayBuffer();
+      if (buf.byteLength > 0) return buf;
+    }
+    console.warn('[S+L Explorer] Proxy-Antwort:', resp.status, resp.statusText);
+    return null;
+  } catch (e) {
+    console.warn('[S+L Explorer] Proxy-Fehler:', e.message);
+    return null;
+  }
 }
 
 /** Recursively collect all files via GET /folders/{id}/items */
@@ -2461,7 +2483,7 @@ function escHtml(str) {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v36 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v38 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
