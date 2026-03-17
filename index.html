@@ -1315,20 +1315,16 @@ async function openPreview(idx) {
   const versionId = f.versionId || f.id;
 
   try {
-    // Trimble 2D Viewer direkt im iframe einbetten
-    // Der Browser ist bereits bei web.connect.trimble.com eingeloggt
     const persistentId = f._persistentFileId || await getPersistentFileId(versionId);
     if (persistentId) f._persistentFileId = persistentId;
 
-    // Viewer-URL (identisch mit dem "Öffnen"-Button)
     const viewerUrl = persistentId
-      ? `https://web.connect.trimble.com/projects/${projectId}/viewer/2D?id=${persistentId}&version=${versionId}&type=revisions&etag=${versionId}`
-      : `https://web.connect.trimble.com/projects/${projectId}/viewer/2D?id=${versionId}&version=${versionId}&type=revisions&etag=${versionId}`;
-
-    console.log('[S+L Explorer] Lade Trimble Viewer im iframe:', viewerUrl);
+      ? `https://web.connect.trimble.com/projects/${projectId}/viewer/2D?id=${persistentId}&version=${versionId}&type=revisions&etag=${versionId}&isEmbedded=true`
+      : `https://web.connect.trimble.com/projects/${projectId}/viewer/2D?id=${versionId}&version=${versionId}&type=revisions&etag=${versionId}&isEmbedded=true`;
 
     previewBaseUrl = viewerUrl;
 
+    // iframe erstellen
     body.innerHTML = `<div class="preview-iframe-wrap" id="previewIframeWrap"
         style="overflow:hidden;background:#1a1d27">
       <iframe id="previewIframe"
@@ -1339,7 +1335,25 @@ async function openPreview(idx) {
     </div>`;
 
     document.getElementById('zoomToolbar').style.display = 'none';
-    console.log('[S+L Explorer] Trimble Viewer iframe gesetzt');
+
+    // Token via Workspace API an den iframe übergeben — verhindert Sign-In-Aufforderung
+    const iframe = document.getElementById('previewIframe');
+    iframe.addEventListener('load', async () => {
+      try {
+        const embedAPI = await TrimbleConnectWorkspace.connect(
+          iframe,
+          () => {},
+          5000
+        );
+        await embedAPI.embed.setTokens({ accessToken });
+        console.log('[S+L Explorer] Token an Viewer-iframe übergeben');
+      } catch (e) {
+        // Kein Fehler — Viewer war bereits eingeloggt oder API nicht verfügbar
+        console.log('[S+L Explorer] embed.setTokens nicht nötig oder nicht verfügbar:', e.message);
+      }
+    }, { once: true });
+
+    console.log('[S+L Explorer] Viewer iframe gesetzt:', viewerUrl);
 
   } catch (err) {
     console.warn('[S+L Explorer] Viewer-iframe fehlgeschlagen, Fallback auf Thumbnail:', err.message);
@@ -2501,7 +2515,7 @@ function escHtml(str) {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v54 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v55 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
