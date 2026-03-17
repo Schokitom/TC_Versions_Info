@@ -2200,6 +2200,7 @@ function renderPathOptions(paths, filter) {
   list.innerHTML = '';
   const filtered = filter ? paths.filter(p => p.toLowerCase().includes(filter.toLowerCase())) : paths;
   for (const path of filtered) {
+    const isChecked = selectedPaths.has(path);
     const div = document.createElement('div');
     div.className = 'path-option' + (isChecked ? ' checked' : '');
     div.title = path;
@@ -2543,7 +2544,7 @@ function openFolderInTrimble(folderId) {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v64 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v65 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
