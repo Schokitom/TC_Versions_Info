@@ -910,6 +910,82 @@
     }
     .scope-toggle:hover { color: var(--text); }
 
+    /* ── Multi-Select & Bulk Download ── */
+    .select-all-th {
+      width: 36px;
+      padding: 10px 8px !important;
+      text-align: center !important;
+    }
+    .row-check-td {
+      width: 36px;
+      padding: 10px 8px !important;
+      text-align: center !important;
+    }
+    .row-checkbox, .select-all-check {
+      accent-color: var(--accent);
+      width: 14px; height: 14px;
+      cursor: pointer;
+    }
+    .bulk-bar {
+      display: none;
+      align-items: center;
+      gap: 10px;
+      padding: 6px 20px;
+      background: rgba(0,194,255,.06);
+      border-bottom: 1px solid var(--accent2);
+      flex-shrink: 0;
+      font-size: 12px;
+      color: var(--text);
+    }
+    .bulk-bar.visible { display: flex; }
+    .bulk-count { color: var(--accent); font-weight: 600; }
+    .bulk-dl-btn {
+      display: flex; align-items: center; gap: 6px;
+      background: var(--accent2);
+      border: 1px solid var(--accent);
+      border-radius: 6px;
+      padding: 5px 12px;
+      font-size: 12px;
+      font-family: var(--font-ui);
+      color: #fff;
+      cursor: pointer;
+      transition: all .15s;
+    }
+    .bulk-dl-btn:hover { background: var(--accent); }
+    .bulk-dl-btn svg { width: 13px; height: 13px; fill: currentColor; }
+    .bulk-dl-btn:disabled { opacity: .5; cursor: default; }
+    .bulk-clear-btn {
+      background: none; border: none; color: var(--muted);
+      cursor: pointer; font-size: 12px; font-family: var(--font-ui);
+      padding: 4px 8px; border-radius: 4px;
+    }
+    .bulk-clear-btn:hover { color: var(--text); background: var(--row-hover); }
+    .dl-progress-wrap {
+      flex: 1; height: 4px; background: var(--border);
+      border-radius: 2px; overflow: hidden; display: none;
+    }
+    .dl-progress-wrap.visible { display: block; }
+    .dl-progress-bar {
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent2), var(--accent));
+      width: 0%; transition: width .2s;
+    }
+
+    /* ── Tree Download Button ── */
+    .tree-dl-btn {
+      display: flex; align-items: center; justify-content: center;
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 3px 6px;
+      cursor: pointer;
+      color: var(--muted);
+      transition: all .15s;
+      flex-shrink: 0;
+    }
+    .tree-dl-btn:hover { border-color: var(--success); color: var(--success); }
+    .tree-dl-btn svg { width: 12px; height: 12px; fill: currentColor; }
+
   </style>
 </head>
 <body>
@@ -967,7 +1043,19 @@
   </button>
 </div>
 
-<!-- Loading state -->
+<!-- Bulk-Download-Leiste -->
+<div class="bulk-bar" id="bulkBar">
+  <span class="bulk-count"><span id="bulkCount">0</span> ausgewählt</span>
+  <button class="bulk-dl-btn" id="bulkDlBtn" onclick="downloadSelected()">
+    <svg viewBox="0 0 24 24"><path d="M5 20h14v-2H5v2zm7-14v8.17l-2.59-2.58L8 13l4 4 4-4-1.41-1.41L13 14.17V6h-1z"/></svg>
+    Auswahl herunterladen
+  </button>
+  <div class="dl-progress-wrap" id="dlProgressWrap">
+    <div class="dl-progress-bar" id="dlProgressBar"></div>
+  </div>
+  <span id="dlProgressLabel" style="font-size:11px;color:var(--muted)"></span>
+  <button class="bulk-clear-btn" onclick="clearSelection()">✕ Auswahl aufheben</button>
+</div>
 <div class="state-overlay" id="stateLoading">
   <div class="spinner"></div>
   <div class="state-title">Lade PDF-Dateien…</div>
@@ -999,6 +1087,9 @@
 <div class="tree-panel" id="treePanel">
   <div class="tree-header">
     <span class="tree-title">Ordner</span>
+    <button class="tree-dl-btn" id="treeDlBtn" onclick="downloadCheckedFolders()" title="Markierte Ordner herunterladen" style="display:none">
+      <svg viewBox="0 0 24 24"><path d="M5 20h14v-2H5v2zm7-14v8.17l-2.59-2.58L8 13l4 4 4-4-1.41-1.41L13 14.17V6h-1z"/></svg>
+    </button>
     <button class="tree-apply-btn" id="treeApplyBtn" onclick="applyFolderFilter()" title="Ausgewählte Ordner laden">
       <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
       Anwenden
@@ -1017,6 +1108,9 @@
   <table id="fileTable">
     <thead>
       <tr>
+        <th class="select-all-th">
+          <input type="checkbox" class="select-all-check" id="selectAllCheck" onchange="toggleSelectAll(this.checked)" title="Alle auswählen" />
+        </th>
         <th onclick="sortTable('name')" id="th-name">
           Name <span class="sort-icon">↕</span>
         </th>
@@ -1101,6 +1195,7 @@ let rootFolderId = null;
 let tcApiBase = null;
 let allFiles  = []; // aktuell angezeigte Dateien (wird durch Suche NICHT verändert)
 let baseFiles = []; // unveränderliche Kopie der per "Anwenden" geladenen Dateien
+let selectedFileIds = new Set(); // für Multi-Select Download
 let sortKey = 'name';
 let sortAsc = true;
 let selectedPaths = new Set(); // leeres Set = alle anzeigen
@@ -1694,6 +1789,7 @@ function updateApplyBtn() {
     btn.textContent = '';
     btn.innerHTML = `<svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg> ${n > 0 ? `${n} Ordner laden` : 'Alle laden'}`;
   }
+  updateTreeDlBtn();
 }
 
 async function applyFolderFilter() {
@@ -1745,6 +1841,7 @@ async function applyFolderFilter() {
     allFiles  = pdfFiles;
     baseFiles = [...pdfFiles]; // unveränderliche Kopie sichern
     selectedPaths.clear();
+    selectedFileIds.clear();
     setProgress(100);
     buildPathDropdown();
     renderTable();
@@ -2101,7 +2198,14 @@ function renderSearchResults() {
     const verCall   = hasId && idx >= 0 ? `openVersionModal(${idx},'${escHtml(name)}')` : null;
 
     const tr = document.createElement('tr');
+    const isChecked = selectedFileIds.has(fileId || idx);
     tr.innerHTML = `
+      <td class="row-check-td">
+        <input type="checkbox" class="row-checkbox"
+               data-id="${fileId || ''}" data-idx="${idx}"
+               ${isChecked ? 'checked' : ''}
+               onchange="toggleRowSelect(this)" />
+      </td>
       <td>
         <div class="name-cell">
           <div class="pdf-icon">PDF</div>
@@ -2403,7 +2507,161 @@ function escHtml(str) {
 }
 
 // ─────────────────────────────────────────
-//  Preview Panel — Resize via Drag
+//  Multi-Select & Bulk Download
+// ─────────────────────────────────────────
+function toggleRowSelect(cb) {
+  const id  = cb.dataset.id;
+  const idx = parseInt(cb.dataset.idx);
+  const key = id || idx;
+  if (cb.checked) selectedFileIds.add(key);
+  else            selectedFileIds.delete(key);
+  updateBulkBar();
+}
+
+function toggleSelectAll(checked) {
+  // Alle sichtbaren Zeilen (aktuell gerenderte Checkboxen)
+  document.querySelectorAll('.row-checkbox').forEach(cb => {
+    const key = cb.dataset.id || parseInt(cb.dataset.idx);
+    if (checked) selectedFileIds.add(key);
+    else         selectedFileIds.delete(key);
+    cb.checked = checked;
+  });
+  updateBulkBar();
+}
+
+function clearSelection() {
+  selectedFileIds.clear();
+  document.querySelectorAll('.row-checkbox').forEach(cb => cb.checked = false);
+  const all = document.getElementById('selectAllCheck');
+  if (all) all.checked = false;
+  updateBulkBar();
+}
+
+function updateBulkBar() {
+  const bar   = document.getElementById('bulkBar');
+  const count = document.getElementById('bulkCount');
+  const n     = selectedFileIds.size;
+  bar.classList.toggle('visible', n > 0);
+  if (count) count.textContent = n;
+  // Indeterminate state für select-all Checkbox
+  const allCheck = document.getElementById('selectAllCheck');
+  if (allCheck) {
+    const total   = document.querySelectorAll('.row-checkbox').length;
+    allCheck.indeterminate = n > 0 && n < total;
+    allCheck.checked       = total > 0 && n === total;
+  }
+}
+
+async function downloadSelected() {
+  const btn      = document.getElementById('bulkDlBtn');
+  const progWrap = document.getElementById('dlProgressWrap');
+  const progBar  = document.getElementById('dlProgressBar');
+  const progLbl  = document.getElementById('dlProgressLabel');
+
+  // Dateiobjekte sammeln — aus allFiles + searchResultFiles
+  const pool = searchResultFiles ? [...searchResultFiles, ...allFiles] : [...allFiles];
+  const toDownload = [];
+  for (const key of selectedFileIds) {
+    const f = pool.find(x => getFileId(x) === key) || allFiles[key];
+    if (f) toDownload.push(f);
+  }
+  if (toDownload.length === 0) return;
+
+  btn.disabled = true;
+  progWrap.classList.add('visible');
+  progLbl.textContent = '';
+
+  let done = 0;
+  for (const f of toDownload) {
+    const fid  = getFileId(f);
+    const name = f.name || 'download';
+    progLbl.textContent = `${done + 1} / ${toDownload.length}: ${name}`;
+    try {
+      await downloadFileDirect(fid, name);
+    } catch (e) {
+      console.warn('[S+L Explorer] Download fehlgeschlagen:', name, e.message);
+    }
+    done++;
+    progBar.style.width = Math.round((done / toDownload.length) * 100) + '%';
+    // Kurze Pause damit Browser Downloads nicht blockiert
+    await new Promise(r => setTimeout(r, 400));
+  }
+
+  progLbl.textContent = `✓ ${done} Dateien heruntergeladen`;
+  setTimeout(() => {
+    progWrap.classList.remove('visible');
+    progBar.style.width = '0%';
+    progLbl.textContent = '';
+    btn.disabled = false;
+  }, 2500);
+}
+
+// Kernfunktion: eine Datei per ID herunterladen
+async function downloadFileDirect(versionId, fileName) {
+  try {
+    const data  = await tcGet(`/files/${versionId}/download`);
+    const dlUrl = typeof data === 'string' ? data : (data.url || data.downloadUrl || null);
+    if (dlUrl) {
+      const a = document.createElement('a');
+      a.href = dlUrl; a.download = fileName; a.target = '_blank';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      return;
+    }
+  } catch (_) {}
+  window.open(`${tcApiBase}/files/${versionId}/download`, '_blank');
+}
+
+// ─────────────────────────────────────────
+//  Ordner-Download aus Baumstruktur
+// ─────────────────────────────────────────
+function updateTreeDlBtn() {
+  const btn = document.getElementById('treeDlBtn');
+  if (btn) btn.style.display = checkedFolderIds.size > 0 ? 'flex' : 'none';
+}
+
+async function downloadCheckedFolders() {
+  if (checkedFolderIds.size === 0) return;
+
+  const btn = document.getElementById('treeDlBtn');
+  btn.disabled = true;
+  setStatus('loading', `Sammle Dateien aus ${checkedFolderIds.size} Ordner(n)…`);
+
+  try {
+    let allEntries = [];
+    for (const id of checkedFolderIds) {
+      const node = findNodeById(folderTree, id);
+      const entries = await collectFiles(id, node?.path || '/', 0);
+      allEntries = allEntries.concat(entries);
+    }
+
+    const pdfFiles = allEntries.filter(f => (f.name || '').toLowerCase().endsWith('.pdf'));
+    if (pdfFiles.length === 0) {
+      setStatus('ok', 'Keine PDF-Dateien in den gewählten Ordnern');
+      btn.disabled = false;
+      return;
+    }
+
+    // Bestätigung
+    const ok = confirm(`${pdfFiles.length} PDF-Dateien aus ${checkedFolderIds.size} Ordner(n) herunterladen?`);
+    if (!ok) { btn.disabled = false; setStatus('ok', 'Abgebrochen'); return; }
+
+    setStatus('loading', `Lade ${pdfFiles.length} PDFs herunter…`);
+    let done = 0;
+    for (const f of pdfFiles) {
+      const fid = getFileId(f);
+      setStatus('loading', `${done + 1}/${pdfFiles.length}: ${f.name}`);
+      try { await downloadFileDirect(fid, f.name); } catch (_) {}
+      done++;
+      await new Promise(r => setTimeout(r, 400));
+    }
+    setStatus('ok', `✓ ${done} PDFs heruntergeladen`);
+  } catch (err) {
+    setStatus('error', `Fehler: ${err.message}`);
+  }
+  btn.disabled = false;
+}
+
+
 // ─────────────────────────────────────────
 (function initResizeHandle() {
   const MIN_WIDTH = 280;
@@ -2515,7 +2773,7 @@ function escHtml(str) {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v55 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v56 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
