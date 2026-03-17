@@ -2393,7 +2393,26 @@ function escHtml(str) {
 // ─────────────────────────────────────────
 (function initResizeHandle() {
   const MIN_WIDTH = 280;
-  let isDragging = false;
+  let isDragging  = false;
+  let ghostWidth  = 0; // Zielbreite während Drag — erst bei mouseup angewendet
+
+  // Ghost-Overlay: zeigt neue Breite an ohne iframe neu zu laden
+  const ghost = document.createElement('div');
+  ghost.style.cssText = `
+    display:none; position:absolute; top:0; right:0; bottom:0;
+    background:rgba(0,194,255,.06); border-left:2px solid var(--accent);
+    pointer-events:none; z-index:50;
+  `;
+  document.body.appendChild(ghost);
+
+  // Breiten-Label im Ghost
+  const ghostLabel = document.createElement('div');
+  ghostLabel.style.cssText = `
+    position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+    background:var(--accent); color:#000; font-size:11px; font-weight:600;
+    padding:3px 8px; border-radius:4px; font-family:var(--font);
+  `;
+  ghost.appendChild(ghostLabel);
 
   document.addEventListener('mousedown', e => {
     const handle = document.getElementById('previewResizeHandle');
@@ -2401,42 +2420,49 @@ function escHtml(str) {
     e.preventDefault();
     isDragging = true;
     handle.classList.add('dragging');
-    const panel = document.getElementById('previewPanel');
-    panel.classList.add('resizing');
-    // Pointer-Events auf iframe deaktivieren damit Drag nicht blockiert wird
-    const iframe = panel.querySelector('iframe');
-    if (iframe) iframe.style.pointerEvents = 'none';
-    document.body.style.cursor = 'col-resize';
+    document.body.style.cursor    = 'col-resize';
     document.body.style.userSelect = 'none';
+
+    // Ghost positionieren
+    const panel = document.getElementById('previewPanel');
+    const rect  = panel.getBoundingClientRect();
+    ghostWidth  = rect.width;
+    ghost.style.display = 'block';
+    ghost.style.width   = ghostWidth + 'px';
+    ghostLabel.textContent = Math.round(ghostWidth) + 'px';
   });
 
   document.addEventListener('mousemove', e => {
     if (!isDragging) return;
-    const panel = document.getElementById('previewPanel');
     const split = document.querySelector('.content-split');
-    if (!panel || !split) return;
-
+    if (!split) return;
     const splitRect = split.getBoundingClientRect();
-    const maxWidth  = Math.floor(splitRect.width * 0.5); // max 50% des Explorers
-    const newWidth  = Math.max(MIN_WIDTH, Math.min(maxWidth, splitRect.right - e.clientX));
+    const maxWidth  = Math.floor(splitRect.width * 0.5);
+    ghostWidth = Math.max(MIN_WIDTH, Math.min(maxWidth, splitRect.right - e.clientX));
 
-    panel.style.width = newWidth + 'px';
+    // Nur Ghost bewegen — iframe wird NICHT berührt
+    ghost.style.width = ghostWidth + 'px';
+    ghostLabel.textContent = Math.round(ghostWidth) + 'px';
   });
 
   document.addEventListener('mouseup', () => {
     if (!isDragging) return;
     isDragging = false;
+    ghost.style.display = 'none';
+
     const handle = document.getElementById('previewResizeHandle');
     if (handle) handle.classList.remove('dragging');
+    document.body.style.cursor    = '';
+    document.body.style.userSelect = '';
+
+    // Breite erst jetzt einmalig setzen — iframe lädt nur dieses EINE Mal
     const panel = document.getElementById('previewPanel');
     if (panel) {
-      panel.classList.remove('resizing');
-      // Pointer-Events auf iframe wieder aktivieren
-      const iframe = panel.querySelector('iframe');
-      if (iframe) iframe.style.pointerEvents = '';
+      panel.classList.add('resizing');
+      panel.style.width = ghostWidth + 'px';
+      // resizing-Klasse kurz danach entfernen (verhindert transition-Flackern)
+      setTimeout(() => panel.classList.remove('resizing'), 50);
     }
-    document.body.style.cursor = '';
-    document.body.style.userSelect = '';
   });
 })();
 
@@ -2475,7 +2501,7 @@ function escHtml(str) {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v53 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v54 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
