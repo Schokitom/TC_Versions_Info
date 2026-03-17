@@ -2593,33 +2593,63 @@ async function downloadSelected() {
 async function buildAndDownloadZip(files, zipName, progBar, progLbl) {
   const zip  = new JSZip();
   let done   = 0;
+  let added  = 0;
 
   for (const f of files) {
     const fid  = getFileId(f);
     const name = f.name || fid || 'datei';
     if (progLbl) progLbl.textContent = `${done + 1}/${files.length}: ${name}`;
-    try {
-      // Datei mit Auth-Token laden
-      const res = await fetch(`${tcApiBase}/files/${fid}/download`, {
-        headers: { Authorization: `Bearer ${accessToken}` }
-      });
-      if (res.ok) {
-        const blob = await res.blob();
-        // Pfad im ZIP beibehalten (ohne führenden Slash)
-        const zipPath = ((f._path || '') + '/' + name).replace(/^\//, '');
-        zip.file(zipPath, blob);
-      } else {
-        console.warn('[S+L Explorer] ZIP: Datei übersprungen:', name, res.status);
+
+    // Verschiedene Endpunkte probieren bis einer funktioniert
+    const urlsToTry = [
+      `${tcApiBase}/files/${fid}/download`,
+      `${tcApiBase}/files/${fid}/versions/${fid}/download`,
+      `${tcApiBase}/files/${fid}/content`,
+    ];
+
+    let gotBlob = false;
+    for (const url of urlsToTry) {
+      try {
+        const res = await fetch(url, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          redirect: 'follow'
+        });
+        console.log(`[S+L Explorer] ZIP fetch ${url} → ${res.status} ${res.statusText} | type: ${res.headers.get('content-type')}`);
+
+        if (res.ok) {
+          const blob = await res.blob();
+          if (blob.size > 0) {
+            const zipPath = ((f._path || '') + '/' + name).replace(/^\//, '');
+            zip.file(zipPath, blob);
+            added++;
+            gotBlob = true;
+            break;
+          } else {
+            console.warn(`[S+L Explorer] ZIP: Blob leer für ${name}`);
+          }
+        } else {
+          const body = await res.text().catch(() => '');
+          console.warn(`[S+L Explorer] ZIP: ${res.status} für ${url} | ${body.slice(0,200)}`);
+        }
+      } catch (e) {
+        console.warn(`[S+L Explorer] ZIP: fetch-Fehler ${url} | ${e.message}`);
       }
-    } catch (e) {
-      console.warn('[S+L Explorer] ZIP: Fehler bei', name, e.message);
     }
+
+    if (!gotBlob) {
+      console.warn(`[S+L Explorer] ZIP: ${name} konnte nicht geladen werden — alle Endpunkte fehlgeschlagen`);
+    }
+
     done++;
     if (progBar) progBar.style.width = Math.round((done / files.length) * 100) + '%';
   }
 
-  // ZIP generieren und herunterladen
-  if (progLbl) progLbl.textContent = 'Erstelle ZIP…';
+  if (added === 0) {
+    alert(`ZIP konnte nicht erstellt werden: keine Dateien konnten heruntergeladen werden.\n\nBitte F12 → Konsole prüfen für Details.`);
+    return;
+  }
+
+  if (progLbl) progLbl.textContent = `Erstelle ZIP (${added} Dateien)…`;
   const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
   const url  = URL.createObjectURL(blob);
   const a    = document.createElement('a');
@@ -2627,6 +2657,7 @@ async function buildAndDownloadZip(files, zipName, progBar, progLbl) {
   document.body.appendChild(a); a.click();
   document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 5000);
+  console.log(`[S+L Explorer] ZIP erstellt: ${added}/${files.length} Dateien`);
 }
 
 // ─────────────────────────────────────────
@@ -2788,7 +2819,7 @@ async function downloadCheckedFolders() {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v57 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v58 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
