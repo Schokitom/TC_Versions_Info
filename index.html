@@ -890,9 +890,9 @@
     <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
     <input type="text" id="searchInput" placeholder="Dateiname suchen…" oninput="filterTable()" />
   </div>
-  <label class="scope-toggle" title="Suche auf aktuell gefilterte Dateien begrenzen">
-    <input type="checkbox" id="searchScopeCheck" />
-    <span>Nur aktuelle Ansicht</span>
+  <label class="scope-toggle" title="Gesamten Explorer durchsuchen (alle Ordner, unabhängig von Auswahl)">
+    <input type="checkbox" id="searchScopeCheck" onchange="filterTable()" />
+    <span>Gesamten Explorer</span>
   </label>
 
   <!-- Path filter dropdown -->
@@ -1139,8 +1139,9 @@ async function tcGet(path) {
 }
 
 /** Recursively collect all files via GET /folders/{id}/items */
-async function collectFiles(folderId, folderPath, depth = 0) {
+async function collectFiles(folderId, folderPath, depth = 0, signal = null) {
   if (depth > 25) return [];
+  if (signal?.aborted) return [];
   let items = [];
   let offset = 0;
   const limit = 500;
@@ -1161,7 +1162,7 @@ async function collectFiles(folderId, folderPath, depth = 0) {
     for (const folder of subFolders) {
       const fid  = folder.id || folder.identifier;
       const name = folder.name || folder.title || fid;
-      const sub  = await collectFiles(fid, `${folderPath}/${name}`, depth + 1);
+      const sub  = await collectFiles(fid, `${folderPath}/${name}`, depth + 1, signal);
       items = items.concat(sub);
     }
     for (const file of files) {
@@ -1808,24 +1809,14 @@ function getModifiedAt(f) {
 
 function renderTable() {
   const query = (document.getElementById('searchInput')?.value || '').toLowerCase();
-  const scopeOnly = document.getElementById('searchScopeCheck')?.checked || false;
 
-  // Basis-Pool: alle Dateien oder nur bereits gefilterte (Pfad/Ordner)
-  // "Nur aktuelle Ansicht" = Suche begrenzt auf Dateien die nach Pfadfilter sichtbar wären
-  let pool = allFiles;
-  if (scopeOnly && selectedPaths.size > 0) {
-    pool = allFiles.filter(f => selectedPaths.has(f._path || '/'));
-  }
-
-  let data = pool.filter(f => {
-    // Textsuche
+  let data = allFiles.filter(f => {
     if (query) {
       const name = (f.name || '').toLowerCase();
       const path = (f._path || '').toLowerCase();
       if (!name.includes(query) && !path.includes(query)) return false;
     }
-    // Pfadfilter (nur wenn Scope NICHT aktiv — sonst schon oben gefiltert)
-    if (!scopeOnly && selectedPaths.size > 0) {
+    if (selectedPaths.size > 0) {
       const path = f._path || '/';
       if (!selectedPaths.has(path)) return false;
     }
@@ -1929,9 +1920,72 @@ function sortTable(key) {
 }
 
 function filterTable() {
-  // Wenn "Nur aktuelle Ansicht" aktiv: Suche auf die bereits gefilterten Dateien begrenzen
-  // Das passiert automatisch durch renderTable — keine Aktion nötig
+  const query = (document.getElementById('searchInput')?.value || '').toLowerCase();
+  const searchAll = document.getElementById('searchScopeCheck')?.checked || false;
+
+  if (searchAll && query) {
+    // Suche im gesamten Explorer — alle Ordner ab Root laden
+    searchEntireProject(query);
+  } else {
+    renderTable();
+  }
+}
+
+// Sucht im gesamten Projekt (alle Ordner) und zeigt Ergebnisse
+let searchAllAbortController = null;
+async function searchEntireProject(query) {
+  // Abbrechen falls bereits eine Suche läuft
+  if (searchAllAbortController) searchAllAbortController.abort();
+  searchAllAbortController = new AbortController();
+  const signal = searchAllAbortController.signal;
+
+  // Statusanzeige
+  setStatus('loading', `Durchsuche gesamten Explorer nach "${query}"…`);
+
+  try {
+    // Lade alle Dateien ab Root (komplett, unabhängig von Ordner-Auswahl)
+    const allEntries = await collectFiles(rootFolderId, '', 0, signal);
+    if (signal.aborted) return;
+
+    const pdfFiles = allEntries.filter(f => (f.name || '').toLowerCase().endsWith('.pdf'));
+
+    // Versionszähler nur für Treffer laden
+    const matched = pdfFiles.filter(f => {
+      const n = (f.name || '').toLowerCase();
+      const p = (f._path || '').toLowerCase();
+      return n.includes(query) || p.includes(query);
+    });
+
+    if (matched.length === 0) {
+      setStatus('ok', `Keine Treffer für "${query}" im gesamten Explorer`);
+      renderTableFiltered([], query);
+      return;
+    }
+
+    // Versionszähler für Treffer nachladen (falls noch nicht vorhanden)
+    for (const f of matched) {
+      if (signal.aborted) return;
+      if (f._versionCount === undefined) {
+        f._versionCount = await getVersionCount(f);
+      }
+    }
+
+    setStatus('ok', `${matched.length} Treffer im gesamten Explorer`);
+    renderTableFiltered(matched, query);
+
+  } catch (err) {
+    if (err.name === 'AbortError') return;
+    setStatus('error', `Fehler: ${err.message}`);
+  }
+}
+
+// Rendert die Tabelle mit einer vorgegebenen Dateiliste (für Gesamtsuche)
+function renderTableFiltered(files, query) {
+  // Temporär allFiles überschreiben für den Render
+  const backup = allFiles;
+  allFiles = files;
   renderTable();
+  allFiles = backup;
 }
 
 // ─────────────────────────────────────────
@@ -2204,7 +2258,7 @@ function escHtml(str) {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v48 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v49 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
