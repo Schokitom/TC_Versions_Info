@@ -1,6 +1,6 @@
 // ═══════════════════════════════════════════════════════════════
-//  S+L Explorer — Volltextsuche v4 (Thumbnail-OCR)
-//  IIFE — keine Scope-Probleme möglich
+//  S+L Explorer — Volltextsuche v5 (Thumbnail-OCR)
+//  Fix: Event-Handler direkt per addEventListener statt oninput
 // ═══════════════════════════════════════════════════════════════
 (function(){
 
@@ -11,7 +11,6 @@
   var _ftsProgress = { done: 0, total: 0, errors: 0 };
   var _tesseractReady = false;
 
-  // ── Tesseract laden ──
   function _loadTesseract() {
     if (_tesseractReady && window.Tesseract) return Promise.resolve(true);
     return new Promise(function(ok) {
@@ -23,7 +22,6 @@
     });
   }
 
-  // ── Thumbnail laden ──
   function _loadThumb(file) {
     var urls = Array.isArray(file.thumbnailUrl) ? file.thumbnailUrl : (file.thumbnailUrl ? [file.thumbnailUrl] : []);
     var url = urls.length > 0 && typeof urls[urls.length - 1] === 'string' ? urls[urls.length - 1] : null;
@@ -35,7 +33,6 @@
       .catch(function() { clearTimeout(tid); return null; });
   }
 
-  // ── OCR ──
   function _ocr(blob) {
     if (!window.Tesseract) return Promise.resolve('');
     return Tesseract.recognize(blob, FTS_CFG.language, { logger: function(){} })
@@ -43,7 +40,6 @@
       .catch(function() { return ''; });
   }
 
-  // ── Datei indexieren ──
   function _indexOne(file) {
     var fid = getFileId(file);
     if (!fid || _ftsIndex[fid]) return Promise.resolve();
@@ -55,7 +51,6 @@
     });
   }
 
-  // ── Indexierung starten ──
   function _startIdx() {
     if (_ftsIndexing) return;
     _ftsIndexing = true;
@@ -65,7 +60,6 @@
       _ftsProgress = { done: 0, total: pdfs.length, errors: 0 };
       _ftsAbort = { stopped: false };
       _uiUpdate('indexing', 'Indexiere 0/' + pdfs.length + ' PDFs...');
-
       var i = 0;
       function nextBatch() {
         if (_ftsAbort.stopped || i >= pdfs.length) {
@@ -77,10 +71,9 @@
         }
         var batch = pdfs.slice(i, i + FTS_CFG.maxConcurrent);
         i += FTS_CFG.maxConcurrent;
-        var ps = batch.map(function(f) {
+        Promise.all(batch.map(function(f) {
           return _indexOne(f).then(function() { _ftsProgress.done++; }).catch(function() { _ftsProgress.done++; _ftsProgress.errors++; });
-        });
-        Promise.all(ps).then(function() {
+        })).then(function() {
           _uiUpdate('indexing', 'Indexiere ' + _ftsProgress.done + '/' + pdfs.length + ' PDFs...');
           nextBatch();
         });
@@ -95,7 +88,6 @@
     _uiUpdate('stopped', 'Gestoppt');
   }
 
-  // ── Suche ──
   function _search(query) {
     if (!query || query.length < 2) return [];
     var terms = query.toLowerCase().split(/\s+/);
@@ -105,12 +97,10 @@
       var fid = getFileId(file);
       if (!fid) continue;
       if (typeof fileMatchesActiveTypes === 'function' && !fileMatchesActiveTypes(file)) continue;
-
       var entry = _ftsIndex[fid];
       var nm = (file.name || '').toLowerCase();
       var pt = (file._path || '').toLowerCase();
       var ot = entry && entry.text ? entry.text.toLowerCase() : '';
-
       var score = 0, mt = [], sn = [];
       for (var ti = 0; ti < terms.length; ti++) {
         var t = terms[ti];
@@ -131,9 +121,7 @@
     return out;
   }
 
-  // ── Ergebnisse rendern ──
   function _render(results, query) {
-    // Alles sichtbar machen
     var el;
     el = document.getElementById('stateLoading'); if (el) el.style.display = 'none';
     el = document.getElementById('stateError'); if (el) el.style.display = 'none';
@@ -146,7 +134,7 @@
     tbody.innerHTML = '';
 
     if (results.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--muted)">' +
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:40px;color:#7a8199">' +
         'Keine Treffer f\u00fcr "' + escHtml(query) + '"' +
         (_ftsIndexing ? '<br><small>(Indexierung l\u00e4uft noch...)</small>' : '') + '</td></tr>';
       setStatus('ok', '0 Treffer');
@@ -162,12 +150,8 @@
       var ver = f._versionCount || 1;
       var path = f._path || '/';
       var init = modBy.split(/[\s.@]+/).map(function(n){return n[0];}).filter(Boolean).join('').toUpperCase().slice(0,2) || '?';
-
-      // Sicherstellen dass die Datei in allFiles ist
       var idx = allFiles.indexOf(f);
       if (idx < 0) { allFiles.push(f); idx = allFiles.length - 1; }
-
-      // Badges
       var badges = '';
       var bcolors = { name: '#00c2ff', path: '#7a8199', content: '#22d3a0' };
       var blabels = { name: 'Name', path: 'Pfad', content: 'Inhalt' };
@@ -175,8 +159,6 @@
         var bt = r.matchType[bi];
         badges += '<span style="display:inline-block;font-size:9px;padding:1px 5px;border-radius:8px;background:' + bcolors[bt] + ';color:#000;font-weight:600;margin-left:4px">' + blabels[bt] + '</span>';
       }
-
-      // Snippet
       var snipHtml = '';
       if (r.snippets.length > 0) {
         var hl = '';
@@ -193,7 +175,6 @@
         }
         snipHtml = '<div style="font-size:10px;color:#7a8199;margin-top:3px;font-style:italic;max-width:500px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + hl + '</div>';
       }
-
       var tr = document.createElement('tr');
       tr.style.borderBottom = '1px solid #2a2d3e';
       tr.innerHTML =
@@ -214,11 +195,9 @@
         '</div></td>';
       tbody.appendChild(tr);
     }
-
     setStatus('ok', results.length + ' Volltexttreffer');
   }
 
-  // ── UI ──
   function _uiUpdate(state, msg) {
     var pill = document.getElementById('ftsPill');
     var st = document.getElementById('ftsStatus');
@@ -245,25 +224,49 @@
       scope.parentNode.insertBefore(lbl, scope.nextSibling);
       scope.parentNode.insertBefore(pill, lbl.nextSibling);
     }
-    // Event listener statt onchange Attribut
     var cb = document.getElementById('ftsCheck');
     if (cb) {
       cb.addEventListener('change', function() {
-        if (cb.checked) { _startIdx(); }
-        else { _stopIdx(); pill.style.display = 'none'; filterTable(); }
+        if (cb.checked) { _startIdx(); } else { _stopIdx(); pill.style.display = 'none'; _doFilter(); }
+      });
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  FIX v5: Eigener Input-Handler auf dem Suchfeld
+    //  Ersetzt den oninput="filterTable()" Attribut-Handler
+    //  mit einem addEventListener der GARANTIERT im richtigen
+    //  Scope (diesem iframe) läuft.
+    // ═══════════════════════════════════════════════════════════
+    var searchInput = document.getElementById('searchInput');
+    if (searchInput) {
+      // Entferne den alten oninput Handler
+      searchInput.removeAttribute('oninput');
+      // Setze neuen Handler
+      searchInput.addEventListener('input', function() {
+        _doFilter();
+      });
+    }
+
+    // Ebenso den searchScopeCheck
+    var scopeCheck = document.getElementById('searchScopeCheck');
+    if (scopeCheck) {
+      scopeCheck.removeAttribute('onchange');
+      scopeCheck.addEventListener('change', function() {
+        _doFilter();
       });
     }
   }
 
-  // ── filterTable Hook ──
-  // Speichere die AKTUELLE filterTable
-  var _origFilter = window.filterTable;
-
-  window.filterTable = function() {
+  // ═══════════════════════════════════════════════════════════
+  //  Zentrale Filter-Funktion — wird bei JEDER Eingabe aufgerufen
+  // ═══════════════════════════════════════════════════════════
+  function _doFilter() {
     var cb = document.getElementById('ftsCheck');
     var ftsOn = cb && cb.checked;
     var inp = document.getElementById('searchInput');
     var query = inp ? inp.value.trim() : '';
+    var scopeCheck = document.getElementById('searchScopeCheck');
+    var searchAll = scopeCheck && scopeCheck.checked;
 
     if (ftsOn && query.length >= 2) {
       var results = _search(query);
@@ -272,28 +275,49 @@
       return;
     }
 
-    // Fallback: Original filterTable
-    if (typeof _origFilter === 'function') {
-      _origFilter();
+    // FTS aktiv aber zu kurzer Query → normale Tabelle
+    if (ftsOn && query.length < 2) {
+      // Rufe die Original-Render-Logik auf
+      searchResultFiles = null;
+      allFiles = baseFiles.slice();
+      if (typeof searchAllAbortController !== 'undefined' && searchAllAbortController) {
+        searchAllAbortController.abort();
+        searchAllAbortController = null;
+      }
+      renderTable();
+      return;
     }
-  };
 
-  // ── Globale Referenzen fuer Debug ──
+    // FTS nicht aktiv → Original filterTable Logik
+    if (searchAll && query) {
+      if (typeof searchEntireProject === 'function') searchEntireProject(query);
+    } else {
+      searchResultFiles = null;
+      allFiles = baseFiles.slice();
+      if (typeof searchAllAbortController !== 'undefined' && searchAllAbortController) {
+        searchAllAbortController.abort();
+        searchAllAbortController = null;
+      }
+      renderTable();
+    }
+  }
+
+  // Auch filterTable überschreiben (für Aufrufe aus anderem Code)
+  var _origFilter = window.filterTable;
+  window.filterTable = _doFilter;
+
+  // Globale Referenzen
   window.fulltextSearch = _search;
   window.renderFtsResults = _render;
-  window.handleFtsToggle = function() {
-    var cb = document.getElementById('ftsCheck');
-    if (cb) cb.dispatchEvent(new Event('change'));
-  };
   window.ftsIndex = _ftsIndex;
 
-  // ── Init ──
+  // Init
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', _initUI);
   } else {
     setTimeout(_initUI, 500);
   }
 
-  console.log('[FTS] Volltextsuche v4 geladen');
+  console.log('[FTS] Volltextsuche v5 geladen');
 
 })();
