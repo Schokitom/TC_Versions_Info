@@ -2805,6 +2805,465 @@ async function openFolderInTrimble(folderId, pathArr) {
     setStatus('error', 'Initialisierungsfehler');
   }
 })();
+// ═══════════════════════════════════════════════════════════════
+//  S+L Explorer — Volltextsuche via Thumbnail-OCR
+//  ═══════════════════════════════════════════════════════════════
+//  Integration: Diesen gesamten Block VOR das schließende </script>
+//  Tag in der index.html einfügen.
+//
+//  Funktionsweise:
+//  1. Lädt PDF-Thumbnails (die funktionieren!) als PNG-Bilder
+//  2. Nutzt Tesseract.js (OCR im Browser) um Text zu erkennen
+//  3. Speichert erkannten Text im Memory-Index
+//  4. Durchsucht Index + Dateinamen bei Volltextsuche
+//
+//  Limitierungen:
+//  - OCR auf Thumbnails ist nicht perfekt (niedrige Auflösung)
+//  - Nur Text der im Thumbnail sichtbar ist wird erkannt
+//  - Erste Seite des PDFs wird indexiert (Thumbnail = Seite 1)
+//  - Workaround bis Trimble den Download-Endpunkt klärt
+// ═══════════════════════════════════════════════════════════════
+
+// ─── Konfiguration ───
+const FTS_CONFIG = {
+  workerUrl: 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
+  corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core-simd-lstm.wasm.js',
+  langPath: 'https://tessdata.projectnaptha.com/4.0.0',
+  language: 'deu+eng',        // Deutsch + Englisch
+  maxConcurrent: 3,            // Parallele OCR-Worker
+  thumbnailTimeout: 10000,     // 10s Timeout pro Thumbnail
+  indexStorageKey: 'sl_fts_index',  // nicht persistent (nur RAM)
+};
+
+// ─── State ───
+let ftsIndex = {};              // { fileId: { text, name, path, indexedAt } }
+let ftsIndexing = false;
+let ftsAbortController = null;
+let ftsProgress = { done: 0, total: 0, errors: 0 };
+let ftsWorker = null;
+
+// ─── Tesseract.js laden ───
+let tesseractLoaded = false;
+async function loadTesseract() {
+  if (tesseractLoaded && window.Tesseract) return true;
+  return new Promise((resolve) => {
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+    script.onload = () => {
+      tesseractLoaded = true;
+      console.log('[FTS] Tesseract.js geladen');
+      resolve(true);
+    };
+    script.onerror = () => {
+      console.error('[FTS] Tesseract.js konnte nicht geladen werden');
+      resolve(false);
+    };
+    document.head.appendChild(script);
+  });
+}
+
+// ─── Thumbnail als Blob laden ───
+async function loadThumbnailBlob(file) {
+  const thumbUrls = Array.isArray(file.thumbnailUrl) ? file.thumbnailUrl : (file.thumbnailUrl ? [file.thumbnailUrl] : []);
+  // Nehme die letzte URL (höchste Auflösung)
+  const thumbUrl = thumbUrls.length > 0
+    ? (typeof thumbUrls[thumbUrls.length - 1] === 'string' ? thumbUrls[thumbUrls.length - 1] : null)
+    : null;
+
+  if (!thumbUrl) return null;
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), FTS_CONFIG.thumbnailTimeout);
+
+    const res = await fetch(thumbUrl, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    if (!res.ok) return null;
+    return await res.blob();
+  } catch (e) {
+    return null;
+  }
+}
+
+// ─── OCR auf einem Thumbnail-Blob ───
+async function ocrThumbnail(blob) {
+  if (!window.Tesseract) return '';
+
+  try {
+    const result = await Tesseract.recognize(blob, FTS_CONFIG.language, {
+      logger: () => {},  // Kein Log-Spam
+    });
+    return (result?.data?.text || '').trim();
+  } catch (e) {
+    console.warn('[FTS] OCR Fehler:', e.message);
+    return '';
+  }
+}
+
+// ─── Einzelne Datei indexieren ───
+async function indexFile(file) {
+  const fileId = getFileId(file);
+  if (!fileId) return;
+
+  // Schon indexiert?
+  if (ftsIndex[fileId]) return;
+
+  const blob = await loadThumbnailBlob(file);
+  if (!blob) {
+    // Kein Thumbnail → nur Name/Pfad indexieren
+    ftsIndex[fileId] = {
+      text: '',
+      name: file.name || '',
+      path: file._path || '/',
+      indexedAt: Date.now(),
+      source: 'name-only',
+    };
+    return;
+  }
+
+  const text = await ocrThumbnail(blob);
+  ftsIndex[fileId] = {
+    text: text,
+    name: file.name || '',
+    path: file._path || '/',
+    indexedAt: Date.now(),
+    source: text ? 'ocr' : 'no-text',
+  };
+}
+
+// ─── Alle PDFs indexieren (Hintergrund) ───
+async function startIndexing() {
+  if (ftsIndexing) return;
+  ftsIndexing = true;
+
+  const loaded = await loadTesseract();
+  if (!loaded) {
+    ftsIndexing = false;
+    updateFtsUI('error', 'Tesseract.js konnte nicht geladen werden');
+    return;
+  }
+
+  // Nur PDFs indexieren (andere Dateitypen haben selten nützliche Thumbnails)
+  const pdfFiles = allFiles.filter(f =>
+    f.name && f.name.toLowerCase().endsWith('.pdf') && f.thumbnailUrl
+  );
+
+  ftsProgress = { done: 0, total: pdfFiles.length, errors: 0 };
+  ftsAbortController = new AbortController();
+
+  updateFtsUI('indexing', `Indexiere 0/${pdfFiles.length} PDFs…`);
+
+  // Batch-Processing mit begrenzter Parallelität
+  const batchSize = FTS_CONFIG.maxConcurrent;
+  for (let i = 0; i < pdfFiles.length; i += batchSize) {
+    if (ftsAbortController?.signal.aborted) break;
+
+    const batch = pdfFiles.slice(i, i + batchSize);
+    const promises = batch.map(async (file) => {
+      try {
+        await indexFile(file);
+      } catch (e) {
+        ftsProgress.errors++;
+      }
+      ftsProgress.done++;
+      updateFtsUI('indexing',
+        `Indexiere ${ftsProgress.done}/${ftsProgress.total} PDFs…` +
+        (ftsProgress.errors > 0 ? ` (${ftsProgress.errors} Fehler)` : '')
+      );
+    });
+
+    await Promise.all(promises);
+  }
+
+  ftsIndexing = false;
+  const indexed = Object.values(ftsIndex).filter(v => v.source === 'ocr').length;
+  updateFtsUI('ready', `${indexed}/${pdfFiles.length} PDFs mit Text indexiert`);
+  console.log(`[FTS] Indexierung abgeschlossen: ${indexed} PDFs mit OCR-Text, ${ftsProgress.errors} Fehler`);
+}
+
+function stopIndexing() {
+  if (ftsAbortController) {
+    ftsAbortController.abort();
+    ftsAbortController = null;
+  }
+  ftsIndexing = false;
+  updateFtsUI('stopped', 'Indexierung gestoppt');
+}
+
+// ─── Volltextsuche ───
+function fulltextSearch(query) {
+  if (!query || query.length < 2) return [];
+
+  const terms = query.toLowerCase().split(/\s+/).filter(t => t.length >= 2);
+  const results = [];
+
+  for (const file of allFiles) {
+    const fileId = getFileId(file);
+    if (!fileId) continue;
+
+    const entry = ftsIndex[fileId];
+    const name = (file.name || '').toLowerCase();
+    const path = (file._path || '').toLowerCase();
+    const ocrText = entry?.text?.toLowerCase() || '';
+
+    // Scoring: Name-Treffer gewichtet höher als OCR-Treffer
+    let score = 0;
+    let matchType = [];
+    let snippets = [];
+
+    for (const term of terms) {
+      if (name.includes(term)) {
+        score += 10;
+        matchType.push('name');
+      }
+      if (path.includes(term)) {
+        score += 3;
+        matchType.push('path');
+      }
+      if (ocrText.includes(term)) {
+        score += 5;
+        matchType.push('content');
+        // Textausschnitt um den Treffer herum
+        const idx = ocrText.indexOf(term);
+        if (idx >= 0) {
+          const start = Math.max(0, idx - 40);
+          const end = Math.min(ocrText.length, idx + term.length + 40);
+          let snippet = (start > 0 ? '…' : '') + ocrText.substring(start, end) + (end < ocrText.length ? '…' : '');
+          snippets.push(snippet);
+        }
+      }
+    }
+
+    if (score > 0) {
+      results.push({
+        file,
+        fileId,
+        score,
+        matchType: [...new Set(matchType)],
+        snippets: snippets.slice(0, 2),  // Max 2 Snippets
+        ocrAvailable: entry?.source === 'ocr',
+      });
+    }
+  }
+
+  // Nach Score sortieren (höchster zuerst)
+  results.sort((a, b) => b.score - a.score);
+  return results;
+}
+
+// ─── UI-Elemente einfügen ───
+function initFtsUI() {
+  // Volltextsuche-Toggle neben dem bestehenden Suchfeld
+  const toolbar = document.getElementById('toolbar');
+  if (!toolbar) return;
+
+  // FTS Toggle-Button
+  const ftsToggle = document.createElement('label');
+  ftsToggle.className = 'scope-toggle';
+  ftsToggle.title = 'Volltextsuche: Durchsucht auch den Inhalt von PDFs (via Thumbnail-OCR)';
+  ftsToggle.innerHTML = `
+    <input type="checkbox" id="ftsCheck" onchange="handleFtsToggle()" />
+    <span>Volltext (OCR)</span>
+  `;
+
+  // Status-Pill für FTS
+  const ftsPill = document.createElement('div');
+  ftsPill.className = 'stat-pill';
+  ftsPill.id = 'ftsPill';
+  ftsPill.style.display = 'none';
+  ftsPill.innerHTML = '<span id="ftsStatus">–</span>';
+
+  // Einfügen nach dem "Gesamten Explorer"-Toggle
+  const scopeToggle = toolbar.querySelector('.scope-toggle');
+  if (scopeToggle) {
+    scopeToggle.parentNode.insertBefore(ftsToggle, scopeToggle.nextSibling);
+    scopeToggle.parentNode.insertBefore(ftsPill, ftsToggle.nextSibling);
+  }
+}
+
+function updateFtsUI(state, message) {
+  const pill = document.getElementById('ftsPill');
+  const status = document.getElementById('ftsStatus');
+  if (!pill || !status) return;
+
+  pill.style.display = 'inline-block';
+  status.textContent = message || '';
+
+  // Farbe je nach Status
+  if (state === 'indexing') {
+    status.style.color = 'var(--warning)';
+  } else if (state === 'ready') {
+    status.style.color = 'var(--success)';
+  } else if (state === 'error' || state === 'stopped') {
+    status.style.color = 'var(--danger)';
+  } else {
+    status.style.color = 'var(--muted)';
+  }
+}
+
+// ─── Event-Handler ───
+function handleFtsToggle() {
+  const checked = document.getElementById('ftsCheck')?.checked || false;
+
+  if (checked) {
+    // Indexierung starten
+    startIndexing();
+  } else {
+    stopIndexing();
+    // Normale Suche wiederherstellen
+    document.getElementById('ftsPill').style.display = 'none';
+    filterTable();
+  }
+}
+
+// ─── Bestehende filterTable erweitern ───
+// Speichere die Original-filterTable-Funktion
+const _originalFilterTable = typeof filterTable === 'function' ? filterTable : null;
+
+// Überschreibe filterTable mit Volltext-Unterstützung
+window.filterTable = function() {
+  const ftsEnabled = document.getElementById('ftsCheck')?.checked || false;
+  const query = (document.getElementById('searchInput')?.value || '').toLowerCase().trim();
+  const searchAll = document.getElementById('searchScopeCheck')?.checked || false;
+
+  if (ftsEnabled && query && query.length >= 2) {
+    // Volltextsuche-Modus
+    const results = fulltextSearch(query);
+    renderFtsResults(results, query);
+    return;
+  }
+
+  // Standard-Verhalten
+  if (searchAll && query) {
+    searchEntireProject(query);
+  } else {
+    searchResultFiles = null;
+    allFiles = [...baseFiles];
+    if (searchAllAbortController) { searchAllAbortController.abort(); searchAllAbortController = null; }
+    renderTable();
+  }
+};
+
+// ─── FTS-Ergebnisse rendern ───
+function renderFtsResults(results, query) {
+  showState('table');
+
+  const tbody = document.getElementById('tableBody');
+  tbody.innerHTML = '';
+
+  if (results.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:30px;color:var(--muted)">
+      Keine Treffer für "${escHtml(query)}"${ftsIndexing ? ' (Indexierung läuft noch…)' : ''}
+    </td></tr>`;
+    return;
+  }
+
+  for (const result of results) {
+    const f = result.file;
+    const name = f.name || '–';
+    const modBy = getModifiedBy(f);
+    const modAt = formatDate(getModifiedAt(f));
+    const versions = f._versionCount || 1;
+    const path = f._path || '/';
+    const initials = modBy.split(/[\s.@]+/).map(n => n[0]).filter(Boolean).join('').toUpperCase().slice(0, 2) || '?';
+    const idx = allFiles.indexOf(f);
+    const fileId = getFileId(f);
+    const hasId = !!fileId;
+
+    // Match-Type Badges
+    const badges = result.matchType.map(t => {
+      const colors = { name: 'var(--accent)', path: 'var(--muted)', content: 'var(--success)' };
+      const labels = { name: 'Name', path: 'Pfad', content: 'Inhalt' };
+      return `<span style="font-size:9px;padding:1px 5px;border-radius:8px;background:${colors[t]};color:#000;font-weight:600;margin-left:4px">${labels[t]}</span>`;
+    }).join('');
+
+    // Snippet-Anzeige (nur wenn Content-Treffer)
+    let snippetHtml = '';
+    if (result.snippets.length > 0) {
+      const highlighted = result.snippets.map(s => {
+        // Suchbegriffe hervorheben
+        let hs = escHtml(s);
+        query.split(/\s+/).forEach(term => {
+          if (term.length >= 2) {
+            const re = new RegExp('(' + term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'gi');
+            hs = hs.replace(re, '<mark style="background:var(--warning);color:#000;padding:0 2px;border-radius:2px">$1</mark>');
+          }
+        });
+        return hs;
+      }).join(' … ');
+      snippetHtml = `<div style="font-size:10px;color:var(--muted);margin-top:3px;font-style:italic;max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${highlighted}</div>`;
+    }
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>
+        <div class="name-cell" style="flex-direction:column;align-items:flex-start;gap:2px">
+          <div style="display:flex;align-items:center;gap:8px">
+            ${getFileIconHtml(name)}
+            <span class="file-link ${hasId ? 'clickable' : ''}"
+                  title="${escHtml(name)}"
+                  ${hasId && idx >= 0 ? `onclick="openFile(${idx})"` : ''}>
+              ${escHtml(name)}
+            </span>
+            ${badges}
+            <button class="open-btn"
+                    ${hasId && idx >= 0 ? `onclick="openFile(${idx})"` : 'disabled style="opacity:.3"'}
+                    title="Im Trimble Viewer öffnen">
+              <svg viewBox="0 0 24 24"><path d="M19 19H5V5h7V3H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/></svg>
+              Öffnen
+            </button>
+          </div>
+          ${snippetHtml}
+        </div>
+      </td>
+      <td class="user-cell"><div class="user-chip"><div class="avatar">${escHtml(initials)}</div><span>${escHtml(modBy)}</span></div></td>
+      <td class="date-cell">${modAt}</td>
+      <td class="versions-cell">
+        <span class="version-badge" ${idx >= 0 ? `onclick="openVersionModal(${idx},'${escHtml(name)}')"` : ''} title="Versionen">${versions}</span>
+      </td>
+      <td class="path-cell" title="${escHtml(path)}">${escHtml(path || '/')}</td>
+      <td class="actions-td" style="text-align:center;vertical-align:middle;white-space:nowrap">
+        <div style="display:inline-flex;gap:4px;align-items:center">
+          <button class="prev-btn" ${hasId && idx >= 0 ? `id="prev-btn-${idx}" onclick="openPreview(${idx})"` : 'disabled style="opacity:.3"'} title="Vorschau">
+            <svg viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>
+          </button>
+          <button class="dl-btn" ${hasId && idx >= 0 ? `onclick="downloadFile(${idx})"` : 'disabled style="opacity:.3"'} title="Download">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M5 20h14v-2H5v2zm7-14v8.17l-2.59-2.58L8 13l4 4 4-4-1.41-1.41L13 14.17V6h-1z"/></svg>
+          </button>
+        </div>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  }
+
+  // Ergebnis-Info
+  setStatus('ok', `${results.length} Volltexttreffer für "${query}"`);
+}
+
+// ─── CSS für FTS-Badges ───
+(function injectFtsStyles() {
+  const style = document.createElement('style');
+  style.textContent = `
+    mark { background: var(--warning) !important; color: #000 !important; padding: 0 2px; border-radius: 2px; }
+    #ftsCheck { accent-color: var(--success); }
+  `;
+  document.head.appendChild(style);
+})();
+
+// ─── Initialisierung ───
+// FTS-UI einfügen sobald DOM bereit
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initFtsUI);
+} else {
+  // Verzögert einfügen um sicherzustellen dass die Toolbar existiert
+  setTimeout(initFtsUI, 500);
+}
+
+console.log('[FTS] Volltextsuche-Modul geladen (Thumbnail-OCR)');
 </script>
 </body>
 </html>
