@@ -2805,25 +2805,6 @@ async function openFolderInTrimble(folderId, pathArr) {
     setStatus('error', 'Initialisierungsfehler');
   }
 })();
-// ═══════════════════════════════════════════════════════════════
-//  S+L Explorer — Volltextsuche via Thumbnail-OCR
-//  ═══════════════════════════════════════════════════════════════
-//  Integration: Diesen gesamten Block VOR das schließende </script>
-//  Tag in der index.html einfügen.
-//
-//  Funktionsweise:
-//  1. Lädt PDF-Thumbnails (die funktionieren!) als PNG-Bilder
-//  2. Nutzt Tesseract.js (OCR im Browser) um Text zu erkennen
-//  3. Speichert erkannten Text im Memory-Index
-//  4. Durchsucht Index + Dateinamen bei Volltextsuche
-//
-//  Limitierungen:
-//  - OCR auf Thumbnails ist nicht perfekt (niedrige Auflösung)
-//  - Nur Text der im Thumbnail sichtbar ist wird erkannt
-//  - Erste Seite des PDFs wird indexiert (Thumbnail = Seite 1)
-//  - Workaround bis Trimble den Download-Endpunkt klärt
-// ═══════════════════════════════════════════════════════════════
-
 // ─── Konfiguration ───
 const FTS_CONFIG = {
   workerUrl: 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
