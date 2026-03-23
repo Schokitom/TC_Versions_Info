@@ -2782,22 +2782,71 @@ async function openFolderInTrimble(folderId, pathArr) {
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
-    const tokenResult = await API.extension.requestPermission('accesstoken');
-    if (tokenResult && tokenResult !== 'pending' && tokenResult !== 'denied') {
-      accessToken = tokenResult;
+
+    // Versuch 1: requestPermission
+    try {
+      const tokenResult = await API.extension.requestPermission('accesstoken');
+      if (tokenResult && tokenResult !== 'pending' && tokenResult !== 'denied') {
+        accessToken = tokenResult;
+        console.log('[S+L Explorer] Token via requestPermission erhalten');
+      }
+    } catch (e) {
+      console.warn('[S+L Explorer] requestPermission Fehler:', e.message);
     }
 
-    // Wait briefly for token event if still pending
+    // Versuch 2: Warte auf Event (bis zu 10 Sekunden, mit Fortschrittsanzeige)
     if (!accessToken) {
-      await new Promise(r => setTimeout(r, 2000));
+      console.log('[S+L Explorer] Warte auf Token via Event...');
+      setLoadingMsg('Warte auf Zugriffstoken… (Bitte Berechtigung erteilen falls Popup erscheint)');
+
+      var tokenWaitAttempts = 0;
+      var maxAttempts = 10; // 10 x 1 Sekunde = 10 Sekunden
+
+      while (!accessToken && tokenWaitAttempts < maxAttempts) {
+        await new Promise(function(r) { setTimeout(r, 1000); });
+        tokenWaitAttempts++;
+        setLoadingMsg('Warte auf Zugriffstoken… (' + tokenWaitAttempts + '/' + maxAttempts + 's)');
+
+        // Versuche nochmal requestPermission (manchmal klappt es beim 2. Mal)
+        if (tokenWaitAttempts === 3 || tokenWaitAttempts === 6) {
+          try {
+            var retry = await API.extension.requestPermission('accesstoken');
+            if (retry && retry !== 'pending' && retry !== 'denied') {
+              accessToken = retry;
+              console.log('[S+L Explorer] Token via Retry erhalten (Versuch ' + tokenWaitAttempts + ')');
+            }
+          } catch (e) { /* ignore */ }
+        }
+      }
+    }
+
+    // Versuch 3: Direkt den Token aus dem Workspace API Event-System holen
+    if (!accessToken) {
+      console.log('[S+L Explorer] Letzter Versuch: getAccessToken...');
+      try {
+        // Manche Workspace API Versionen haben getAccessToken
+        if (API.extension && typeof API.extension.getAccessToken === 'function') {
+          var directToken = await API.extension.getAccessToken();
+          if (directToken) {
+            accessToken = directToken;
+            console.log('[S+L Explorer] Token via getAccessToken erhalten');
+          }
+        }
+      } catch (e) { /* ignore */ }
     }
 
     if (!accessToken) {
-      throw new Error('Kein Zugriffstoken erhalten. Bitte Berechtigungen in den Extension-Einstellungen erlauben.');
+      throw new Error(
+        'Kein Zugriffstoken erhalten.\n\n' +
+        'Mögliche Lösungen:\n' +
+        '1. Seite neu laden (Strg+F5)\n' +
+        '2. Einstellungen → Erweiterungen → S+L Explorer → Berechtigung zurücksetzen\n' +
+        '3. Aus Trimble Connect abmelden und neu anmelden\n' +
+        '4. Browser-Cache leeren (Strg+Shift+Delete)'
+      );
     }
 
     await loadFiles();
-
   } catch (err) {
     console.error('Init error:', err);
     document.getElementById('errorMessage').textContent = err.message || String(err);
