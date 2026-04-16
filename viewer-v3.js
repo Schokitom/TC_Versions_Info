@@ -1,16 +1,13 @@
 // ═══════════════════════════════════════════════════════════════
-//  S+L Explorer — Enhanced Viewer v3
+//  S+L Explorer — Enhanced Viewer v4
 // ═══════════════════════════════════════════════════════════════
 //
-//  Verbesserungen gegenüber v2:
-//  - Scharfes PDF-Rendering (Multi-Layer-Strategie)
-//  - Strg+Mausrad = Zoom
-//  - Mittlere Maustaste halten = Verschieben (Pan)
-//  - Abgekoppeltes Fenster bleibt offen und aktualisiert sich
-//    bei jedem neuen Vorschau-Klick (Continuous Preview Mode)
-//  - Floating-Fenster entfernt (vereinfacht UX)
+//  Fixes gegenüber v3:
+//  - Seite wird vollständig dargestellt (Scroll-Boundaries korrekt)
+//  - "Fit-to-Window" beim initialen Laden (Blatt komplett sichtbar)
+//  - Externes Fenster: gleiche scharfe Render-Qualität wie inline
+//  - Externes Fenster: ebenfalls Fit-to-Window bei jedem neuen File
 //
-//  Integration: <script src="viewer-v3.js"></script>
 // ═══════════════════════════════════════════════════════════════
 (function() {
 
@@ -24,10 +21,11 @@
   var _currentPdf = null;
   var _currentPage = 1;
   var _currentZoom = 1.0;
+  var _fitZoom = 1.0;        // Zoom bei dem das Blatt komplett sichtbar ist
   var _currentFile = null;
   var _currentBlobUrl = null;
   var _externalWindow = null;
-  var _pageOriginalViewports = {}; // Cache für Original-Viewport pro Seite
+  var _pageOriginalViewports = {};
 
   function loadPdfJs() {
     if (_pdfjsLib) return Promise.resolve(_pdfjsLib);
@@ -71,19 +69,21 @@
       '.sl-viewer-zoom-info { font-family: var(--font, monospace); font-size: 11px; color: #7a8199; min-width: 45px; text-align: center; cursor: pointer; user-select: none; }' +
       '.sl-viewer-zoom-info:hover { color: #00c2ff; }' +
       '.sl-viewer-spacer { flex: 1; }' +
-      '.sl-viewer-canvas-wrap { flex: 1; overflow: auto; background: #2a2d3e; display: flex; flex-direction: column; align-items: center; gap: 8px; position: relative; cursor: default; }' +
+      // ═══ KRITISCH: scrollbares Wrap mit korrekter Padding-Strategie ═══
+      '.sl-viewer-canvas-wrap { flex: 1; overflow: auto; background: #2a2d3e; position: relative; cursor: default; }' +
       '.sl-viewer-canvas-wrap.panning { cursor: grabbing; user-select: none; }' +
       '.sl-viewer-canvas-wrap::-webkit-scrollbar { width: 10px; height: 10px; }' +
       '.sl-viewer-canvas-wrap::-webkit-scrollbar-thumb { background: #555; border-radius: 5px; }' +
       '.sl-viewer-canvas-wrap::-webkit-scrollbar-thumb:hover { background: #777; }' +
-      '.sl-viewer-page-container { padding: 12px 0; display: flex; flex-direction: column; align-items: center; gap: 10px; min-width: 100%; min-height: 100%; }' +
-      '.sl-viewer-page { background: white; box-shadow: 0 2px 8px rgba(0,0,0,.4); display: block; }' +
-      '.sl-viewer-image { display: block; box-shadow: 0 2px 8px rgba(0,0,0,.4); image-rendering: -webkit-optimize-contrast; transform-origin: center center; }' +
-      '.sl-viewer-loading { display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; color: #7a8199; gap: 12px; padding: 40px; }' +
+      // Page-Container: inline-block-Verhalten, damit er sich mit dem Inhalt vergrößert
+      '.sl-viewer-page-container { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 20px; min-width: min-content; min-height: min-content; }' +
+      '.sl-viewer-page { background: white; box-shadow: 0 2px 12px rgba(0,0,0,.5); display: block; }' +
+      '.sl-viewer-image { display: block; box-shadow: 0 2px 12px rgba(0,0,0,.5); image-rendering: -webkit-optimize-contrast; }' +
+      '.sl-viewer-loading { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: #7a8199; gap: 12px; padding: 40px; }' +
       '.sl-viewer-spinner { width: 36px; height: 36px; border: 3px solid #2a2d3e; border-top-color: #00c2ff; border-radius: 50%; animation: sl-spin .7s linear infinite; }' +
       '@keyframes sl-spin { to { transform: rotate(360deg); } }' +
       '.sl-viewer-error { color: #ef4444; padding: 20px; text-align: center; font-size: 12px; }' +
-      '.sl-hint { font-size: 10px; color: #555; padding: 4px 10px; text-align: center; background: #0f1117; border-top: 1px solid #2a2d3e; }';
+      '.sl-hint { font-size: 10px; color: #555; padding: 4px 10px; text-align: center; background: #0f1117; border-top: 1px solid #2a2d3e; flex-shrink: 0; }';
     var style = document.createElement('style');
     style.id = 'sl-viewer-styles';
     style.textContent = css;
@@ -97,18 +97,19 @@
       '<button class="sl-viewer-btn" id="sl-next-page" title="Nächste Seite"><svg viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg></button>'
       : '';
 
-    var externalBtnLabel = _externalWindow && !_externalWindow.closed ? 'Externes Fenster aktiv' : 'Abkoppeln';
+    var externalBtnLabel = _externalWindow && !_externalWindow.closed ? 'Wieder andocken' : 'Abkoppeln';
     var externalBtnClass = _externalWindow && !_externalWindow.closed ? 'sl-viewer-btn active' : 'sl-viewer-btn';
 
     return '' +
       '<div class="sl-viewer-toolbar">' +
         pdfControls +
-        '<button class="sl-viewer-btn" id="sl-zoom-out" title="Verkleinern (Strg+-)">−</button>' +
-        '<span class="sl-viewer-zoom-info" id="sl-zoom-info" title="Klicken = 100%">100%</span>' +
-        '<button class="sl-viewer-btn" id="sl-zoom-in" title="Vergrößern (Strg++)">+</button>' +
-        '<button class="sl-viewer-btn" id="sl-zoom-fit" title="Seitenbreite">Fit</button>' +
+        '<button class="sl-viewer-btn" id="sl-zoom-out" title="Verkleinern">−</button>' +
+        '<span class="sl-viewer-zoom-info" id="sl-zoom-info" title="Klicken = Fit">100%</span>' +
+        '<button class="sl-viewer-btn" id="sl-zoom-in" title="Vergrößern">+</button>' +
+        '<button class="sl-viewer-btn" id="sl-zoom-fit" title="Blatt komplett anzeigen">Fit</button>' +
+        '<button class="sl-viewer-btn" id="sl-zoom-100" title="Originalgröße">100%</button>' +
         '<div class="sl-viewer-spacer"></div>' +
-        '<button class="' + externalBtnClass + '" id="sl-detach-external" title="Externes Fenster öffnen/aktivieren">' +
+        '<button class="' + externalBtnClass + '" id="sl-detach-external" title="Externes Fenster öffnen/schließen">' +
           '<svg viewBox="0 0 24 24"><path d="M19 4H5c-1.11 0-2 .9-2 2v12c0 1.1.89 2 2 2h4v-2H5V8h14v10h-4v2h4c1.1 0 2-.9 2-2V6c0-1.1-.89-2-2-2zm-7 6l-4 4h3v6h2v-6h3l-4-4z"/></svg>' +
           '<span id="sl-detach-label">' + externalBtnLabel + '</span>' +
         '</button>' +
@@ -125,34 +126,33 @@
   }
 
   // ═══════════════════════════════════════════════════════════════
-  //  HOCHAUFLÖSENDES PDF-RENDERING
+  //  PDF-RENDERING mit fixer interner Auflösung
   // ═══════════════════════════════════════════════════════════════
-  function renderPdfPage(pdf, pageNum, canvas, zoom) {
+  // Strategie: Intern IMMER in hoher Pixel-Dichte rendern (z.B. 2x).
+  // Die CSS-Anzeigegröße bestimmt den visuellen Zoom.
+  // Beim Hochzoomen wird neu gerendert damit auch bei starker Vergrößerung scharf.
+
+  function renderPdfPage(pdf, pageNum, canvas, displayZoom) {
     return pdf.getPage(pageNum).then(function(page) {
       var dpr = window.devicePixelRatio || 1;
 
-      // Basis-Viewport (100% Zoom, ohne DPR)
+      // Basis-Viewport (PDF-Intrinsic-Größe)
       var baseViewport = page.getViewport({ scale: 1.0 });
       _pageOriginalViewports[pageNum] = baseViewport;
 
-      // Render-Scale: hoch, damit Schrift scharf ist
-      // Bei niedrigen Zooms trotzdem hoch rendern, damit Zoomen in die Cache
-      // auch bei PDF-Viewer-Standard ist 72dpi → wir rendern mit Faktor 3
-      var displayScale = zoom;
-      var renderMultiplier = Math.max(3, displayScale * 3); // mindestens 3x
-      var renderScale = renderMultiplier * dpr;
+      // Render-Auflösung: hoch genug für gute Schärfe auf aktuellem Zoom-Level
+      // Bei Zoom 1.0: mindestens 2x rendern. Bei Zoom 2.0: 4x. Bei Zoom 0.3 (Fit): 2x reicht.
+      var renderMultiplier = Math.max(2, displayZoom * 2) * dpr;
+      var viewport = page.getViewport({ scale: renderMultiplier });
 
-      var viewport = page.getViewport({ scale: renderScale });
-
-      // Canvas physische Größe = gerenderte Pixel
       canvas.width = Math.floor(viewport.width);
       canvas.height = Math.floor(viewport.height);
 
-      // Canvas CSS-Größe = Zoom-abhängig
-      var displayWidth = baseViewport.width * displayScale;
-      var displayHeight = baseViewport.height * displayScale;
-      canvas.style.width = displayWidth + 'px';
-      canvas.style.height = displayHeight + 'px';
+      // CSS-Größe = Anzeige-Zoom angewendet auf Basis-Viewport
+      var cssWidth = baseViewport.width * displayZoom;
+      var cssHeight = baseViewport.height * displayZoom;
+      canvas.style.width = cssWidth + 'px';
+      canvas.style.height = cssHeight + 'px';
 
       var ctx = canvas.getContext('2d');
       return page.render({
@@ -162,30 +162,51 @@
     });
   }
 
-  function renderPdf(pdf, targetContainer) {
+  function renderPdf(pdf, targetContainer, initialZoom) {
     targetContainer.innerHTML = '';
     _currentPage = 1;
     _pageOriginalViewports = {};
 
-    var renderPromises = [];
-    for (var i = 1; i <= pdf.numPages; i++) {
-      (function(pageNum) {
-        var canvas = document.createElement('canvas');
-        canvas.className = 'sl-viewer-page';
-        canvas.id = 'sl-page-' + pageNum;
-        targetContainer.appendChild(canvas);
-        renderPromises.push(renderPdfPage(pdf, pageNum, canvas, _currentZoom));
-      })(i);
-    }
+    // Erst Platzhalter-Canvases erzeugen mit Basis-Viewport-Größe
+    var firstPagePromise = pdf.getPage(1);
 
-    updatePageInfo();
-    updateZoomInfo();
-    return Promise.all(renderPromises);
+    return firstPagePromise.then(function(firstPage) {
+      // Fit-Zoom berechnen: Wie muss gezoomt werden damit Seite 1 komplett sichtbar ist?
+      var firstVp = firstPage.getViewport({ scale: 1.0 });
+      _pageOriginalViewports[1] = firstVp;
+
+      // Wrap-Dimensionen ermitteln
+      var wrap = document.getElementById('sl-canvas-wrap');
+      var availW = wrap ? wrap.clientWidth - 40 : 800;  // 40 = Padding
+      var availH = wrap ? wrap.clientHeight - 40 : 600;
+
+      var fitX = availW / firstVp.width;
+      var fitY = availH / firstVp.height;
+      _fitZoom = Math.min(fitX, fitY);
+
+      // Wenn kein initialer Zoom angegeben: Fit
+      var zoom = initialZoom !== undefined ? initialZoom : _fitZoom;
+      _currentZoom = zoom;
+
+      // Alle Seiten rendern
+      var renderPromises = [];
+      for (var i = 1; i <= pdf.numPages; i++) {
+        (function(pageNum) {
+          var canvas = document.createElement('canvas');
+          canvas.className = 'sl-viewer-page';
+          canvas.id = 'sl-page-' + pageNum;
+          targetContainer.appendChild(canvas);
+          renderPromises.push(renderPdfPage(pdf, pageNum, canvas, zoom));
+        })(i);
+      }
+
+      updatePageInfo();
+      updateZoomInfo();
+      return Promise.all(renderPromises);
+    });
   }
 
   function updateCanvasSizes() {
-    // Nur CSS-Größe neu setzen, Canvas selbst nicht neu rendern
-    // (das würde Performance kosten und Qualität verlieren)
     if (!_currentPdf) return;
     for (var i = 1; i <= _currentPdf.numPages; i++) {
       var canvas = document.getElementById('sl-page-' + i);
@@ -198,9 +219,7 @@
   }
 
   function rerenderAllPages() {
-    if (!_currentPdf) return;
-    var container = document.getElementById('sl-page-container');
-    if (!container) return;
+    if (!_currentPdf) return Promise.resolve();
     var promises = [];
     for (var i = 1; i <= _currentPdf.numPages; i++) {
       var canvas = document.getElementById('sl-page-' + i);
@@ -238,33 +257,28 @@
   // ═══════════════════════════════════════════════════════════════
   var _zoomDebounce = null;
 
-  function setZoom(newZoom, cursorX, cursorY) {
-    _currentZoom = Math.max(0.3, Math.min(5, newZoom));
+  function setZoom(newZoom) {
+    _currentZoom = Math.max(0.1, Math.min(6, newZoom));
     updateZoomInfo();
 
-    var wrap = document.getElementById('sl-canvas-wrap');
-
-    // Sofort: CSS-Größe anpassen (fast aber unscharf beim Hochzoom)
     if (_currentPdf) {
-      // Scroll-Position halten (auf Cursor zentriert wenn angegeben)
-      var oldScrollLeft = wrap ? wrap.scrollLeft : 0;
-      var oldScrollTop = wrap ? wrap.scrollTop : 0;
-
+      // Sofort: CSS-Größe anpassen (sieht evtl. unscharf aus bei Hochzoom)
       updateCanvasSizes();
 
-      // Debounced: Hochqualitativ nachrendern
+      // Debounced: In hoher Qualität nachrendern
       if (_zoomDebounce) clearTimeout(_zoomDebounce);
       _zoomDebounce = setTimeout(function() {
         rerenderAllPages();
-      }, 300);
+      }, 250);
     } else {
       applyImageZoom();
     }
   }
 
-  function zoomIn() { setZoom(_currentZoom + 0.15); }
-  function zoomOut() { setZoom(_currentZoom - 0.15); }
-  function zoomFit() { setZoom(1.0); }
+  function zoomIn() { setZoom(_currentZoom * 1.15); }
+  function zoomOut() { setZoom(_currentZoom / 1.15); }
+  function zoomFit() { setZoom(_fitZoom); }
+  function zoom100() { setZoom(1.0); }
 
   function applyImageZoom() {
     var img = document.querySelector('.sl-viewer-image');
@@ -279,14 +293,13 @@
       if (!e.ctrlKey) return;
       e.preventDefault();
 
-      var delta = e.deltaY > 0 ? -0.1 : 0.1;
-      var newZoom = _currentZoom + delta;
-      setZoom(newZoom);
+      var factor = e.deltaY > 0 ? 1 / 1.1 : 1.1;
+      setZoom(_currentZoom * factor);
     }, { passive: false });
   }
 
   // ═══════════════════════════════════════════════════════════════
-  //  MITTLERE MAUSTASTE = PAN (Verschieben)
+  //  MITTLERE MAUSTASTE = PAN
   // ═══════════════════════════════════════════════════════════════
   function setupMiddleMousePan(wrap) {
     var panning = false;
@@ -294,7 +307,7 @@
     var startScrollLeft = 0, startScrollTop = 0;
 
     wrap.addEventListener('mousedown', function(e) {
-      if (e.button !== 1) return; // nur mittlere Maustaste
+      if (e.button !== 1) return;
       e.preventDefault();
       panning = true;
       startX = e.clientX;
@@ -319,35 +332,28 @@
       }
     });
 
-    // AutoScroll-Symbol von Mittelklick unterdrücken
     wrap.addEventListener('auxclick', function(e) {
       if (e.button === 1) e.preventDefault();
     });
   }
 
   // ═══════════════════════════════════════════════════════════════
-  //  EXTERNES FENSTER (Continuous Preview)
+  //  EXTERNES FENSTER
   // ═══════════════════════════════════════════════════════════════
   function toggleExternalWindow() {
     if (_externalWindow && !_externalWindow.closed) {
-      // Fenster schon offen → schließen
       _externalWindow.close();
       _externalWindow = null;
       updateDetachButton();
-      // Inline-Viewer wieder einblenden
       var panel = document.getElementById('previewPanel');
       var handle = document.getElementById('previewResizeHandle');
       if (panel) panel.classList.add('open');
       if (handle) handle.style.display = '';
-      // Aktuelles File neu laden (Inline)
       if (_currentFile) openInViewer(_currentFile);
       return;
     }
 
-    // Neues externes Fenster öffnen
     openExternalWindow();
-
-    // Inline-Viewer ausblenden
     var panel = document.getElementById('previewPanel');
     var handle = document.getElementById('previewResizeHandle');
     if (panel) panel.classList.remove('open');
@@ -365,16 +371,13 @@
 
     _externalWindow = extWin;
 
-    // HTML für externes Fenster schreiben
     var htmlDoc = buildExternalWindowHTML();
     extWin.document.open();
     extWin.document.write(htmlDoc);
     extWin.document.close();
 
-    // Event-Handler im externen Fenster einrichten
     extWin.addEventListener('load', function() {
       setupExternalWindowHandlers(extWin);
-      // Wenn bereits ein File geöffnet war, direkt darstellen
       if (_currentFile) {
         loadFileInExternal(_currentFile);
       } else {
@@ -382,7 +385,6 @@
       }
     });
 
-    // Fallback falls load nicht feuert
     setTimeout(function() {
       if (extWin.document && !extWin.__initialized) {
         setupExternalWindowHandlers(extWin);
@@ -391,13 +393,11 @@
       }
     }, 300);
 
-    // Erkennen wenn Fenster geschlossen wird
     var checkClosed = setInterval(function() {
       if (!_externalWindow || _externalWindow.closed) {
         clearInterval(checkClosed);
         _externalWindow = null;
         updateDetachButton();
-        // Inline-Viewer wieder zeigen
         var panel = document.getElementById('previewPanel');
         var handle = document.getElementById('previewResizeHandle');
         if (panel && _currentFile) {
@@ -446,16 +446,16 @@
         '.wrap::-webkit-scrollbar { width: 10px; height: 10px; }' +
         '.wrap::-webkit-scrollbar-thumb { background: #555; border-radius: 5px; }' +
         '.wrap::-webkit-scrollbar-thumb:hover { background: #777; }' +
-        '.page-container { padding: 16px 0; display: flex; flex-direction: column; align-items: center; gap: 12px; min-width: 100%; min-height: 100%; }' +
-        '.page { background: white; box-shadow: 0 2px 8px rgba(0,0,0,.5); display: block; }' +
-        '.image { display: block; box-shadow: 0 2px 8px rgba(0,0,0,.5); image-rendering: -webkit-optimize-contrast; transform-origin: center center; }' +
+        '.page-container { display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 20px; min-width: min-content; min-height: min-content; }' +
+        '.page { background: white; box-shadow: 0 2px 12px rgba(0,0,0,.5); display: block; }' +
+        '.image { display: block; box-shadow: 0 2px 12px rgba(0,0,0,.5); image-rendering: -webkit-optimize-contrast; }' +
         '.loading { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: #7a8199; gap: 12px; padding: 40px; }' +
         '.spinner { width: 40px; height: 40px; border: 3px solid #2a2d3e; border-top-color: #00c2ff; border-radius: 50%; animation: spin .7s linear infinite; }' +
         '@keyframes spin { to { transform: rotate(360deg); } }' +
         '.placeholder { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: #7a8199; gap: 16px; padding: 40px; text-align: center; }' +
         '.placeholder svg { width: 64px; height: 64px; opacity: .3; fill: currentColor; }' +
         '.error { color: #ef4444; padding: 20px; text-align: center; }' +
-        '.hint { padding: 4px 12px; background: #0f1117; color: #7a8199; font-size: 10px; text-align: center; border-top: 1px solid #2a2d3e; }' +
+        '.hint { padding: 4px 12px; background: #0f1117; color: #7a8199; font-size: 10px; text-align: center; border-top: 1px solid #2a2d3e; flex-shrink: 0; }' +
       '</style>' +
       '</head><body>' +
       '<div class="toolbar">' +
@@ -465,9 +465,10 @@
         '<span class="info" id="extPageInfo" style="display:none">–</span>' +
         '<button id="extNextPage" title="Nächste Seite" style="display:none"><svg viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg></button>' +
         '<button id="extZoomOut" title="Verkleinern">−</button>' +
-        '<span class="info" id="extZoomInfo" title="Klicken = 100%">100%</span>' +
+        '<span class="info" id="extZoomInfo" title="Klicken = Fit">100%</span>' +
         '<button id="extZoomIn" title="Vergrößern">+</button>' +
-        '<button id="extZoomFit">Fit</button>' +
+        '<button id="extZoomFit" title="Blatt komplett anzeigen">Fit</button>' +
+        '<button id="extZoom100" title="Originalgröße">100%</button>' +
         '<div class="spacer"></div>' +
         '<button id="extFullscreen" title="Vollbild (F11)"><svg viewBox="0 0 24 24"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg> Vollbild</button>' +
       '</div>' +
@@ -505,6 +506,7 @@
       pdf: null,
       page: 1,
       zoom: 1.0,
+      fitZoom: 1.0,
       blobUrl: null,
       kind: null,
       origViewports: {},
@@ -513,20 +515,21 @@
 
     var zoomDebounce = null;
 
-    function renderExtPage(pageNum, canvas, zoom) {
+    // ═══ IDENTISCHES Rendering wie im Inline-Viewer ═══
+    function renderExtPage(pageNum, canvas, displayZoom) {
       return state.pdf.getPage(pageNum).then(function(page) {
         var dpr = extWin.devicePixelRatio || 1;
         var baseViewport = page.getViewport({ scale: 1.0 });
         state.origViewports[pageNum] = baseViewport;
 
-        var renderMultiplier = Math.max(3, zoom * 3);
-        var renderScale = renderMultiplier * dpr;
-        var viewport = page.getViewport({ scale: renderScale });
+        var renderMultiplier = Math.max(2, displayZoom * 2) * dpr;
+        var viewport = page.getViewport({ scale: renderMultiplier });
 
         canvas.width = Math.floor(viewport.width);
         canvas.height = Math.floor(viewport.height);
-        canvas.style.width = (baseViewport.width * zoom) + 'px';
-        canvas.style.height = (baseViewport.height * zoom) + 'px';
+
+        canvas.style.width = (baseViewport.width * displayZoom) + 'px';
+        canvas.style.height = (baseViewport.height * displayZoom) + 'px';
 
         return page.render({
           canvasContext: canvas.getContext('2d'),
@@ -535,26 +538,38 @@
       });
     }
 
-    function renderAllPages() {
+    function renderAllPagesWithInitialFit() {
       if (!state.pdf) return Promise.resolve();
       var wrap = doc.getElementById('extWrap');
       wrap.innerHTML = '<div class="page-container" id="extPageContainer"></div>';
       var container = doc.getElementById('extPageContainer');
-      state.page = 1;
-      state.origViewports = {};
-      var promises = [];
-      for (var i = 1; i <= state.pdf.numPages; i++) {
-        (function(n) {
-          var c = doc.createElement('canvas');
-          c.className = 'page';
-          c.id = 'extPage' + n;
-          container.appendChild(c);
-          promises.push(renderExtPage(n, c, state.zoom));
-        })(i);
-      }
-      updatePageInfo();
-      updateZoomInfo();
-      return Promise.all(promises);
+
+      return state.pdf.getPage(1).then(function(firstPage) {
+        var firstVp = firstPage.getViewport({ scale: 1.0 });
+        state.origViewports[1] = firstVp;
+
+        var availW = wrap.clientWidth - 40;
+        var availH = wrap.clientHeight - 40;
+        var fitX = availW / firstVp.width;
+        var fitY = availH / firstVp.height;
+        state.fitZoom = Math.min(fitX, fitY);
+        state.zoom = state.fitZoom;
+
+        state.page = 1;
+        var promises = [];
+        for (var i = 1; i <= state.pdf.numPages; i++) {
+          (function(n) {
+            var c = doc.createElement('canvas');
+            c.className = 'page';
+            c.id = 'extPage' + n;
+            container.appendChild(c);
+            promises.push(renderExtPage(n, c, state.zoom));
+          })(i);
+        }
+        updatePageInfo();
+        updateZoomInfo();
+        return Promise.all(promises);
+      });
     }
 
     function updateCanvasSizesOnly() {
@@ -590,24 +605,25 @@
     }
 
     function setZoomExt(newZoom) {
-      state.zoom = Math.max(0.3, Math.min(5, newZoom));
+      state.zoom = Math.max(0.1, Math.min(6, newZoom));
       updateZoomInfo();
       if (state.pdf) {
         updateCanvasSizesOnly();
         if (zoomDebounce) clearTimeout(zoomDebounce);
-        zoomDebounce = setTimeout(rerenderAll, 300);
+        zoomDebounce = setTimeout(rerenderAll, 250);
       } else {
         var img = doc.querySelector('.image');
         if (img) img.style.transform = 'scale(' + state.zoom + ')';
       }
     }
 
-    // Toolbar-Events
+    // Toolbar
     var btn;
-    btn = doc.getElementById('extZoomIn'); if (btn) btn.onclick = function() { setZoomExt(state.zoom + 0.15); };
-    btn = doc.getElementById('extZoomOut'); if (btn) btn.onclick = function() { setZoomExt(state.zoom - 0.15); };
-    btn = doc.getElementById('extZoomFit'); if (btn) btn.onclick = function() { setZoomExt(1.0); };
-    btn = doc.getElementById('extZoomInfo'); if (btn) btn.onclick = function() { setZoomExt(1.0); };
+    btn = doc.getElementById('extZoomIn'); if (btn) btn.onclick = function() { setZoomExt(state.zoom * 1.15); };
+    btn = doc.getElementById('extZoomOut'); if (btn) btn.onclick = function() { setZoomExt(state.zoom / 1.15); };
+    btn = doc.getElementById('extZoomFit'); if (btn) btn.onclick = function() { setZoomExt(state.fitZoom); };
+    btn = doc.getElementById('extZoom100'); if (btn) btn.onclick = function() { setZoomExt(1.0); };
+    btn = doc.getElementById('extZoomInfo'); if (btn) btn.onclick = function() { setZoomExt(state.fitZoom); };
 
     btn = doc.getElementById('extPrevPage'); if (btn) btn.onclick = function() {
       if (state.page > 1) {
@@ -629,13 +645,13 @@
       if (doc.documentElement.requestFullscreen) doc.documentElement.requestFullscreen();
     };
 
-    // Strg+Mausrad Zoom
+    // Strg+Mausrad
     var wrap = doc.getElementById('extWrap');
     wrap.addEventListener('wheel', function(e) {
       if (!e.ctrlKey) return;
       e.preventDefault();
-      var delta = e.deltaY > 0 ? -0.1 : 0.1;
-      setZoomExt(state.zoom + delta);
+      var factor = e.deltaY > 0 ? 1 / 1.1 : 1.1;
+      setZoomExt(state.zoom * factor);
     }, { passive: false });
 
     // Mittlere Maustaste Pan
@@ -658,9 +674,8 @@
     });
     wrap.addEventListener('auxclick', function(e) { if (e.button === 1) e.preventDefault(); });
 
-    // Expose render function für loadFileInExternal
     extWin.__render = {
-      renderAllPages: renderAllPages,
+      renderAllPagesWithInitialFit: renderAllPagesWithInitialFit,
       state: state,
     };
   }
@@ -682,27 +697,20 @@
 
     if (title) title.textContent = file.name || 'Datei';
 
-    // Loading
     wrap.innerHTML = '<div class="loading"><div class="spinner"></div><div>Lade…</div></div>';
 
-    // Kontrollen zurücksetzen
     var kind = getFileKind(file.name);
     state.kind = kind;
     state.pdf = null;
     state.page = 1;
-    state.zoom = 1.0;
     state.origViewports = {};
 
-    // UI-Elemente ein/ausblenden je nach Typ
     var pp = doc.getElementById('extPrevPage');
     var np = doc.getElementById('extNextPage');
     var pi = doc.getElementById('extPageInfo');
     if (pp) pp.style.display = kind === 'pdf' ? '' : 'none';
     if (np) np.style.display = kind === 'pdf' ? '' : 'none';
     if (pi) pi.style.display = kind === 'pdf' ? '' : 'none';
-
-    var zi = doc.getElementById('extZoomInfo');
-    if (zi) zi.textContent = '100%';
 
     var fileId = getFileId(file);
     if (!fileId) {
@@ -731,12 +739,29 @@
       state.blobUrl = URL.createObjectURL(blob);
 
       if (kind === 'image') {
+        // Bild: Fit-to-Window berechnen
         wrap.innerHTML = '<div class="page-container"></div>';
         var container = wrap.querySelector('.page-container');
         var img = doc.createElement('img');
         img.className = 'image';
         img.src = state.blobUrl;
         container.appendChild(img);
+
+        // Nach dem Laden Fit-Zoom setzen
+        img.onload = function() {
+          var availW = wrap.clientWidth - 40;
+          var availH = wrap.clientHeight - 40;
+          var natW = img.naturalWidth || 1;
+          var natH = img.naturalHeight || 1;
+          var fitX = availW / natW;
+          var fitY = availH / natH;
+          state.fitZoom = Math.min(1, Math.min(fitX, fitY));
+          state.zoom = state.fitZoom;
+          img.style.width = (natW * state.zoom) + 'px';
+          img.style.height = (natH * state.zoom) + 'px';
+          var zi = doc.getElementById('extZoomInfo');
+          if (zi) zi.textContent = Math.round(state.zoom * 100) + '%';
+        };
         return;
       }
 
@@ -747,7 +772,7 @@
       }).then(function(pdf) {
         state.pdf = pdf;
         if (_externalWindow.__render) {
-          return _externalWindow.__render.renderAllPages();
+          return _externalWindow.__render.renderAllPagesWithInitialFit();
         }
       });
     }).catch(function(e) {
@@ -766,6 +791,7 @@
     btn = document.getElementById('sl-zoom-in'); if (btn) btn.onclick = zoomIn;
     btn = document.getElementById('sl-zoom-out'); if (btn) btn.onclick = zoomOut;
     btn = document.getElementById('sl-zoom-fit'); if (btn) btn.onclick = zoomFit;
+    btn = document.getElementById('sl-zoom-100'); if (btn) btn.onclick = zoom100;
     btn = document.getElementById('sl-zoom-info'); if (btn) btn.onclick = zoomFit;
 
     btn = document.getElementById('sl-detach-external'); if (btn) btn.onclick = toggleExternalWindow;
@@ -799,7 +825,7 @@
 
     _currentFile = file;
 
-    // Falls externes Fenster aktiv: dort laden, Inline überspringen
+    // Externes Fenster aktiv? → dort anzeigen
     if (_externalWindow && !_externalWindow.closed) {
       loadFileInExternal(file);
       return true;
@@ -836,7 +862,6 @@
 
     bindToolbarEvents();
 
-    var wrap = document.getElementById('sl-canvas-wrap');
     var pageContainer = document.getElementById('sl-page-container');
 
     var fileId = getFileId(file);
@@ -858,8 +883,24 @@
         var img = document.createElement('img');
         img.className = 'sl-viewer-image';
         img.src = _currentBlobUrl;
-        img.style.transition = 'transform .15s';
         pageContainer.appendChild(img);
+
+        // Fit-to-Window für Bilder
+        img.onload = function() {
+          var wrap = document.getElementById('sl-canvas-wrap');
+          var availW = wrap ? wrap.clientWidth - 40 : 800;
+          var availH = wrap ? wrap.clientHeight - 40 : 600;
+          var natW = img.naturalWidth || 1;
+          var natH = img.naturalHeight || 1;
+          var fitX = availW / natW;
+          var fitY = availH / natH;
+          _fitZoom = Math.min(1, Math.min(fitX, fitY));
+          _currentZoom = _fitZoom;
+          img.style.width = (natW * _currentZoom) + 'px';
+          img.style.height = (natH * _currentZoom) + 'px';
+          updateZoomInfo();
+        };
+
         var pgi = document.getElementById('sl-page-info');
         var pp = document.getElementById('sl-prev-page');
         var np = document.getElementById('sl-next-page');
@@ -893,7 +934,6 @@
     var file = allFiles[idx];
     if (!file) return;
 
-    // Externes Fenster aktiv? → dort anzeigen
     if (_externalWindow && !_externalWindow.closed) {
       var kind = getFileKind(file.name);
       if (kind === 'pdf' || kind === 'image') {
@@ -914,12 +954,11 @@
     cleanupCurrentBlob();
     _currentFile = null;
     _currentPdf = null;
-    // Externes Fenster NICHT schließen — wir zeigen Placeholder
     if (_externalWindow && !_externalWindow.closed) {
       showExternalPlaceholder();
     }
     if (typeof _origClosePreview === 'function') _origClosePreview();
   };
 
-  console.log('[Viewer] Enhanced Viewer v3 geladen (HiDPI + Continuous External Preview)');
+  console.log('[Viewer] Enhanced Viewer v4 geladen (Fit-to-Window + Sharp External)');
 })();
