@@ -1,15 +1,6 @@
 // ═══════════════════════════════════════════════════════════════
-//  S+L Explorer — Volltextsuche v6 (PDF.js + Download-Endpoint)
-// ═══════════════════════════════════════════════════════════════
-//
-//  Echte Volltextsuche:
-//  1. Holt signierte Download-URL über /files/fs/{id}/downloadurl
-//  2. Laedt PDF-Bytes direkt vom Trimble Cloud Storage
-//  3. Extrahiert Text aus ALLEN Seiten via PDF.js
-//  4. Cached extrahierten Text als PSet (persistent)
-//  5. Durchsucht alle Texte bei Query
-//
-//  Integration: <script src="volltextsuche-v6.js"></script>
+//  S+L Explorer — Volltextsuche v7 (PDF.js + Download-Endpoint)
+//  FIX: Korrigiertes PSet-Schema (ohne 'v' Feld, mit proper types)
 // ═══════════════════════════════════════════════════════════════
 (function() {
 
@@ -22,14 +13,18 @@
   var PDFJS_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.mjs';
   var PDFJS_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.mjs';
 
-  var SCHEMA_PROPS = {
-    'fulltext':      { type: 'string', required: false },
-    'page_count':    { type: 'number', required: false },
-    'extracted_at':  { type: 'string', required: false },
-    'file_hash':     { type: 'string', required: false },
+  // ═══ KORRIGIERTES SCHEMA ═══
+  // Format laut tcfiles-Beispiel: properties direkt im schema, ohne 'v' Feld
+  var SCHEMA = {
+    open: true,
+    props: {
+      'fulltext':     { type: 'string' },
+      'page_count':   { type: 'integer' },
+      'extracted_at': { type: 'string', format: 'date-time' },
+    }
   };
 
-  var _ftsIndex = {};        // { fileId: { text, pages, ... } }
+  var _ftsIndex = {};
   var _indexing = false;
   var _abort = null;
   var _progress = { done: 0, total: 0, cached: 0, extracted: 0, errors: 0 };
@@ -37,7 +32,6 @@
   var _defExists = false;
   var _pdfjsLib = null;
 
-  // ─── PDF.js Loader ───
   function loadPdfJs() {
     if (_pdfjsLib) return Promise.resolve(_pdfjsLib);
     return import(PDFJS_URL).then(function(lib) {
@@ -51,7 +45,6 @@
     });
   }
 
-  // ─── PSet API Helper ───
   function psetFetch(path, method, body) {
     var opts = {
       method: method || 'GET',
@@ -70,29 +63,32 @@
     });
   }
 
-  // ─── PSet-Definition für Volltext-Cache anlegen ───
   function ensureDefinition() {
     _libId = 'tcproject:prod:' + projectId;
     return psetFetch('/libs/' + _libId + '/defs/' + DEF_ID, 'GET').then(function(r) {
-      if (r.ok) { _defExists = true; return true; }
+      if (r.ok) {
+        _defExists = true;
+        console.log('[FTS] Definition existiert bereits');
+        return true;
+      }
       console.log('[FTS] Erstelle Volltext-Cache Definition...');
-      return psetFetch('/libs/' + _libId + '/defs', 'POST', {
+      var body = {
         id: DEF_ID,
         name: DEF_NAME,
-        schema: { v: 0, open: true, props: SCHEMA_PROPS },
-        i18n: { 'de-DE': { name: DEF_NAME, props: {
-          'fulltext': 'Volltext', 'page_count': 'Seiten',
-          'extracted_at': 'Extrahiert am', 'file_hash': 'Datei-Hash',
-        }}}
-      }).then(function(r2) {
-        if (r2.ok || r2.status === 201) { _defExists = true; return true; }
-        console.error('[FTS] Def-Fehler:', r2.status, r2.data);
+        schema: SCHEMA,
+      };
+      return psetFetch('/libs/' + _libId + '/defs', 'POST', body).then(function(r2) {
+        if (r2.ok || r2.status === 201) {
+          _defExists = true;
+          console.log('[FTS] Definition erstellt!');
+          return true;
+        }
+        console.error('[FTS] Def-Fehler:', r2.status, JSON.stringify(r2.data));
         return false;
       });
     });
   }
 
-  // ─── PSet lesen (Cache prüfen) ───
   function readCache(fileId) {
     var link = 'frn:tcfile:' + fileId;
     return psetFetch(
@@ -103,7 +99,6 @@
     }).catch(function() { return null; });
   }
 
-  // ─── PSet schreiben (Cache aktualisieren) ───
   function writeCache(fileId, data) {
     var link = 'frn:tcfile:' + fileId;
     return psetFetch(
@@ -115,7 +110,6 @@
     }).catch(function() { return false; });
   }
 
-  // ─── Download-URL holen ───
   function getDownloadUrl(fileId) {
     return fetch(PROXY_URL + '/core-fs/' + fileId + '/downloadurl?base=' + TC_BASE, {
       headers: { 'Authorization': 'Bearer ' + accessToken },
@@ -127,7 +121,6 @@
     }).catch(function() { return null; });
   }
 
-  // ─── PDF laden und Text extrahieren ───
   function extractPdfText(fileId) {
     return getDownloadUrl(fileId).then(function(dlUrl) {
       if (!dlUrl) throw new Error('Keine Download-URL');
@@ -156,7 +149,6 @@
     });
   }
 
-  // ─── Eine Datei indexieren (Cache oder Extraktion) ───
   function indexOne(file) {
     var fileId = getFileId(file);
     if (!fileId) return Promise.resolve({ src: 'skip' });
@@ -178,6 +170,7 @@
           src: 'extracted',
         };
         _progress.extracted++;
+        // Schreibe Cache (max 1 MB Text)
         return writeCache(fileId, {
           fulltext: result.text.substring(0, 1000000),
           page_count: result.pages,
@@ -194,7 +187,6 @@
     });
   }
 
-  // ─── Indexierung starten ───
   function startIndexing() {
     if (_indexing) return;
     _indexing = true;
@@ -246,7 +238,6 @@
     _uiUpdate('stopped', 'Gestoppt');
   }
 
-  // ─── Suche ───
   function ftsSearch(query) {
     if (!query || query.length < 2) return [];
     var terms = query.toLowerCase().split(/\s+/).filter(function(t) { return t.length >= 2; });
@@ -279,16 +270,13 @@
           if (matchFields.indexOf('Pfad') < 0) matchFields.push('Pfad');
         }
         if (content.indexOf(term) >= 0) {
-          // Punktzahl abhängig von Häufigkeit
           var occurrences = content.split(term).length - 1;
           score += 5 * Math.min(occurrences, 10);
           if (matchFields.indexOf('Inhalt') < 0) matchFields.push('Inhalt');
-          // Snippet erzeugen
           var ci = content.indexOf(term);
           var s0 = Math.max(0, ci - 50);
           var s1 = Math.min(content.length, ci + term.length + 50);
           var snippet = (s0 > 0 ? '...' : '') + content.substring(s0, s1) + (s1 < content.length ? '...' : '');
-          // Nur einmal pro Term hinzufügen
           if (snippets.length < 3) snippets.push(snippet);
         }
       }
@@ -310,7 +298,6 @@
     return results;
   }
 
-  // ─── Ergebnisse rendern ───
   function renderResults(results, query) {
     var el;
     el = document.getElementById('stateLoading'); if (el) el.style.display = 'none';
@@ -391,7 +378,6 @@
     setStatus('ok', results.length + ' Volltexttreffer');
   }
 
-  // ─── UI ───
   function _uiUpdate(state, msg) {
     var pill = document.getElementById('ftsPill');
     var st = document.getElementById('ftsStatus');
@@ -484,5 +470,5 @@
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _initUI);
   else setTimeout(_initUI, 500);
 
-  console.log('[FTS] Volltextsuche v6 geladen (PDF.js + Download-Endpoint)');
+  console.log('[FTS] Volltextsuche v7 geladen (PDF.js + Download-Endpoint, Schema fixed)');
 })();
