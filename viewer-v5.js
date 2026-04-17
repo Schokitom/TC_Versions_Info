@@ -1,6 +1,6 @@
 // ═══════════════════════════════════════════════════════════════
-//  S+L Explorer — Enhanced Viewer v11
-//  Fix: Trimble Viewer Token + "Abkoppeln mit:" Label
+//  S+L Explorer — Enhanced Viewer v12
+//  Fix: Auge-Highlighting + Alle Viewer synchron aktualisiert
 // ═══════════════════════════════════════════════════════════════
 (function() {
 
@@ -8,6 +8,7 @@
   var TC_BASE = 'https://app21.connect.trimble.com';
 
   var _currentFile = null;
+  var _currentIdx = -1;
   var _extTrimble = null;
   var _extNative = null;
 
@@ -35,6 +36,22 @@
   }
 
   // ═══════════════════════════════════════════════════════════════
+  //  AUGE-HIGHLIGHTING
+  //  Entfernt .active von allen prev-btns und setzt es auf den
+  //  aktuellen. Funktioniert unabhängig vom Original-Code.
+  // ═══════════════════════════════════════════════════════════════
+  function updateEyeHighlight(idx) {
+    // Alle prev-btns deaktivieren
+    var allBtns = document.querySelectorAll('.prev-btn');
+    for (var i = 0; i < allBtns.length; i++) {
+      allBtns[i].classList.remove('active');
+    }
+    // Aktuelles aktivieren
+    var activeBtn = document.getElementById('prev-btn-' + idx);
+    if (activeBtn) activeBtn.classList.add('active');
+  }
+
+  // ═══════════════════════════════════════════════════════════════
   //  CSS
   // ═══════════════════════════════════════════════════════════════
   function injectStyles() {
@@ -57,7 +74,6 @@
   // ═══════════════════════════════════════════════════════════════
   function injectDetachButtons() {
     if (document.getElementById('sl-detach-wrap')) return;
-
     var previewHeader = document.querySelector('.preview-header');
     if (!previewHeader) return;
 
@@ -67,26 +83,23 @@
     wrap.className = 'sl-detach-wrap';
     wrap.id = 'sl-detach-wrap';
 
-    // Hinweistext
     var hint = document.createElement('span');
     hint.className = 'sl-detach-hint';
     hint.textContent = 'Abkoppeln mit:';
     wrap.appendChild(hint);
 
-    // Button Trimble
     var btnT = document.createElement('button');
     btnT.className = 'sl-dbtn';
     btnT.id = 'sl-detach-trimble';
-    btnT.title = 'Externes Fenster mit Trimble Viewer (gleiche Ansicht wie eingebettet)';
+    btnT.title = 'Externes Fenster mit Trimble Viewer';
     btnT.innerHTML = '<svg viewBox="0 0 24 24"><path d="M19 4H5c-1.11 0-2 .9-2 2v12c0 1.1.89 2 2 2h4v-2H5V8h14v10h-4v2h4c1.1 0 2-.9 2-2V6c0-1.1-.89-2-2-2zm-7 6l-4 4h3v6h2v-6h3l-4-4z"/></svg><span id="sl-label-trimble">Trimble</span>';
     btnT.onclick = function() { toggleExtTrimble(); };
     wrap.appendChild(btnT);
 
-    // Button Nativ
     var btnN = document.createElement('button');
     btnN.className = 'sl-dbtn';
     btnN.id = 'sl-detach-native';
-    btnN.title = 'Externes Fenster mit nativem Browser-PDF-Viewer (schärfer, mit Strg+F Suche)';
+    btnN.title = 'Externes Fenster mit nativem PDF-Viewer (schärfer, mit Strg+F)';
     btnN.innerHTML = '<svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6zm-1 1.5L18.5 9H13V3.5zM8 13h8v1H8v-1zm0 3h8v1H8v-1zm0-6h4v1H8v-1z"/></svg><span id="sl-label-native">Nativ</span>';
     btnN.onclick = function() { toggleExtNative(); };
     wrap.appendChild(btnN);
@@ -101,28 +114,22 @@
     var btnN = document.getElementById('sl-detach-native');
     var lblT = document.getElementById('sl-label-trimble');
     var lblN = document.getElementById('sl-label-native');
-
     if (btnT) {
-      if (_extTrimble && !_extTrimble.closed) { btnT.classList.add('active'); if (lblT) lblT.textContent = 'Trimble ✓'; }
+      if (_extTrimble && !_extTrimble.closed) { btnT.classList.add('active'); if (lblT) lblT.textContent = 'Trimble \u2713'; }
       else { btnT.classList.remove('active'); if (lblT) lblT.textContent = 'Trimble'; }
     }
     if (btnN) {
-      if (_extNative && !_extNative.closed) { btnN.classList.add('active'); if (lblN) lblN.textContent = 'Nativ ✓'; }
+      if (_extNative && !_extNative.closed) { btnN.classList.add('active'); if (lblN) lblN.textContent = 'Nativ \u2713'; }
       else { btnN.classList.remove('active'); if (lblN) lblN.textContent = 'Nativ'; }
     }
   }
 
   // ═══════════════════════════════════════════════════════════════
   //  TRIMBLE VIEWER — EXTERNES FENSTER
-  //  Öffnet die Trimble Viewer-URL direkt im Fenster
-  //  (nicht als iframe in eigenem HTML — vermeidet Token-Probleme)
   // ═══════════════════════════════════════════════════════════════
   function toggleExtTrimble() {
     if (_extTrimble && !_extTrimble.closed) {
-      _extTrimble.close();
-      _extTrimble = null;
-      updateButtons();
-      return;
+      _extTrimble.close(); _extTrimble = null; updateButtons(); return;
     }
     openExtTrimble();
   }
@@ -131,43 +138,28 @@
     var extWin = window.open('about:blank', 'sl-viewer-trimble', 'width=1200,height=900,menubar=no,toolbar=no,location=no,status=no,resizable=yes,scrollbars=yes');
     if (!extWin) { alert('Popup blockiert!'); return; }
     _extTrimble = extWin;
-
-    if (_currentFile) {
-      loadTrimbleInExternal(_currentFile);
-    } else {
-      writeExtPlaceholder(extWin, 'Trimble Viewer');
-    }
-
+    if (_currentFile) loadTrimbleInExternal(_currentFile);
     watchClose(function() { return _extTrimble; }, function() { _extTrimble = null; updateButtons(); });
     updateButtons();
   }
 
   function loadTrimbleInExternal(file) {
     if (!_extTrimble || _extTrimble.closed) return;
-
     var fileId = getFileId(file);
     var versionId = file.versionId || fileId;
     if (!fileId) return;
-
-    // Trimble Viewer URL — DIREKT als Fenster-URL navigieren
-    // So bekommt der Viewer die volle Browser-Session inkl. Cookies
     var viewerUrl = 'https://web.connect.trimble.com/projects/' + projectId +
       '/viewer/2D?id=' + versionId + '&version=' + versionId +
       '&type=revisions&etag=' + versionId;
-
     _extTrimble.location.href = viewerUrl;
   }
 
   // ═══════════════════════════════════════════════════════════════
   //  NATIVER PDF-VIEWER — EXTERNES FENSTER
-  //  Bleibt als eigenes HTML mit iframe (Continuous Preview)
   // ═══════════════════════════════════════════════════════════════
   function toggleExtNative() {
     if (_extNative && !_extNative.closed) {
-      _extNative.close();
-      _extNative = null;
-      updateButtons();
-      return;
+      _extNative.close(); _extNative = null; updateButtons(); return;
     }
     openExtNative();
   }
@@ -176,47 +168,39 @@
     var extWin = window.open('', 'sl-viewer-native', 'width=1200,height=900,menubar=no,toolbar=no,location=no,status=no,resizable=yes,scrollbars=yes');
     if (!extWin) { alert('Popup blockiert!'); return; }
     _extNative = extWin;
-
     writeExtShell(extWin, 'Nativer PDF-Viewer');
-
     if (_currentFile) setTimeout(function() { loadNativeInExternal(_currentFile); }, 150);
-
     watchClose(function() { return _extNative; }, function() { _extNative = null; updateButtons(); });
     updateButtons();
   }
 
   function loadNativeInExternal(file) {
     if (!_extNative || _extNative.closed) return;
-
     var doc;
     try { doc = _extNative.document; } catch(e) { return; }
-
     var frame = doc.getElementById('extFrame');
     var title = doc.getElementById('extTitle');
     if (!frame) return;
 
     var kind = getFileKind(file.name);
-
-    if (title) { title.textContent = file.name; _extNative.document.title = file.name + ' — S+L Viewer'; }
+    if (title) { title.textContent = file.name; _extNative.document.title = file.name + ' \u2014 S+L Viewer'; }
 
     if (kind !== 'pdf' && kind !== 'image') {
-      frame.innerHTML = '<div class="placeholder"><div>Dieser Dateityp wird nur im Trimble Viewer unterstützt.</div></div>';
+      frame.innerHTML = '<div class="placeholder"><div>Dieser Dateityp wird nur im Trimble Viewer unterst\u00fctzt.</div></div>';
       return;
     }
 
-    frame.innerHTML = '<div class="loading"><div class="spinner"></div><div style="font-size:13px">Lade ' + escHtml(file.name) + '…</div></div>';
+    frame.innerHTML = '<div class="loading"><div class="spinner"></div><div style="font-size:13px">Lade ' + escHtml(file.name) + '\u2026</div></div>';
 
     var fileId = getFileId(file);
     if (!fileId) { frame.innerHTML = '<div class="placeholder"><div>Keine Datei-ID</div></div>'; return; }
 
     getDownloadUrl(fileId).then(function(signedUrl) {
       if (!_extNative || _extNative.closed) return;
-
       var extDoc;
       try { extDoc = _extNative.document; } catch(e) { return; }
       var extFrame = extDoc.getElementById('extFrame');
       if (!extFrame) return;
-
       extFrame.innerHTML = '';
 
       if (kind === 'pdf') {
@@ -269,7 +253,7 @@
       '</style></head><body>' +
       '<div class="toolbar">' +
         '<svg width="20" height="20" viewBox="0 0 24 24" fill="#00c2ff"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6z"/></svg>' +
-        '<div class="title" id="extTitle">Warte auf Auswahl…</div>' +
+        '<div class="title" id="extTitle">Warte auf Auswahl\u2026</div>' +
         '<span class="subtitle">' + escHtml(subtitle) + '</span>' +
         '<button id="extFullscreen"><svg viewBox="0 0 24 24"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg> Vollbild</button>' +
       '</div>' +
@@ -278,7 +262,6 @@
       '</div>' +
       '</body></html>');
     doc.close();
-
     setTimeout(function() {
       try {
         var fsBtn = extWin.document.getElementById('extFullscreen');
@@ -289,16 +272,12 @@
     }, 100);
   }
 
-  function writeExtPlaceholder(extWin, subtitle) {
-    writeExtShell(extWin, subtitle || '');
-  }
-
   function showExtPlaceholder(extWin) {
     try {
       var frame = extWin.document.getElementById('extFrame');
       var title = extWin.document.getElementById('extTitle');
       if (frame) frame.innerHTML = '<div class="placeholder"><svg viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg><div>Klicken Sie im Explorer auf das Auge-Symbol<br>um eine Datei hier anzuzeigen</div></div>';
-      if (title) title.textContent = 'Warte auf Auswahl…';
+      if (title) title.textContent = 'Warte auf Auswahl\u2026';
     } catch(e) {}
   }
 
@@ -327,27 +306,24 @@
     if (!file) return;
 
     _currentFile = file;
+    _currentIdx = idx;
 
     if (!_btnInjected) injectDetachButtons();
 
-    var extActive = false;
+    // ═══ IMMER das Auge-Highlighting aktualisieren ═══
+    updateEyeHighlight(idx);
 
-    // Trimble-Fenster aktualisieren
+    // Externe Fenster aktualisieren (falls offen)
     if (_extTrimble && !_extTrimble.closed) {
       loadTrimbleInExternal(file);
-      extActive = true;
     }
 
-    // Nativ-Fenster aktualisieren
     if (_extNative && !_extNative.closed) {
       loadNativeInExternal(file);
-      extActive = true;
     }
 
-    // Wenn externes Fenster aktiv: Inline überspringen
-    if (extActive) return;
-
-    // Normal: Original-Viewer
+    // ═══ Eingebetteten Viewer IMMER aktualisieren ═══
+    // So bleibt auch der Inline-Viewer synchron
     if (typeof _origOpenPreview === 'function') {
       _origOpenPreview(idx);
     }
@@ -361,17 +337,16 @@
   var _origClosePreview = window.closePreview;
   window.closePreview = function() {
     _currentFile = null;
+    _currentIdx = -1;
 
-    // Trimble-Fenster: Wir können nach Navigation nicht mehr auf das DOM zugreifen
-    // → nichts tun, der Viewer bleibt einfach stehen
+    // Auge-Highlighting entfernen
+    var allBtns = document.querySelectorAll('.prev-btn');
+    for (var i = 0; i < allBtns.length; i++) allBtns[i].classList.remove('active');
 
-    // Nativ-Fenster: Platzhalter zeigen
-    if (_extNative && !_extNative.closed) {
-      showExtPlaceholder(_extNative);
-    }
+    if (_extNative && !_extNative.closed) showExtPlaceholder(_extNative);
 
     if (typeof _origClosePreview === 'function') _origClosePreview();
   };
 
-  console.log('[Viewer] Enhanced Viewer v11 geladen (Trimble direkt + Nativ Proxy)');
+  console.log('[Viewer] Enhanced Viewer v12 geladen (Eye-Highlight Sync)');
 })();
