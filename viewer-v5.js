@@ -1,14 +1,13 @@
 // ═══════════════════════════════════════════════════════════════
-//  S+L Explorer — Enhanced Viewer v8
-//  PDF-Proxy via Worker für korrekten Content-Type
+//  S+L Explorer — Enhanced Viewer v9
 // ═══════════════════════════════════════════════════════════════
 //
 //  Strategie:
-//  - Signierte URL holen (unverändert!)
-//  - An Worker /pdf-view?url=... weiterleiten
-//  - Worker holt PDF und liefert mit Content-Type: application/pdf
-//  - Browser rendert nativ (gestochen scharf)
-//  - Kein Sandbox-Problem (iframe src = Worker-URL)
+//  - Eingebettet: Original Trimble-Viewer (funktioniert im Sandbox)
+//    + Abkoppeln-Button in der Toolbar
+//  - Extern: Eigenes Fenster mit iframe → Worker-Proxy-URL
+//    Fenster bleibt offen, iframe-src wird bei jedem neuen
+//    Dokument aktualisiert (Continuous Preview)
 //
 // ═══════════════════════════════════════════════════════════════
 (function() {
@@ -31,7 +30,6 @@
     });
   }
 
-  // Signierte URL → Worker-Proxy-URL die application/pdf liefert
   function toPdfViewUrl(signedUrl) {
     return PROXY_URL + '/pdf-view?url=' + encodeURIComponent(signedUrl);
   }
@@ -43,183 +41,42 @@
     return 'other';
   }
 
-  function injectStyles() {
-    if (document.getElementById('sl-viewer-styles')) return;
-    var css =
-      '.sl-viewer-container{position:relative;width:100%;height:100%;background:#1a1d27;display:flex;flex-direction:column;overflow:hidden}' +
-      '.sl-viewer-toolbar{display:flex;align-items:center;gap:4px;padding:6px 10px;background:#0f1117;border-bottom:1px solid #2a2d3e;flex-shrink:0}' +
-      '.sl-viewer-btn{background:none;border:1px solid #2a2d3e;border-radius:4px;color:#7a8199;cursor:pointer;padding:3px 8px;font-size:11px;font-family:var(--font-ui,sans-serif);display:inline-flex;align-items:center;gap:3px;transition:all .15s;white-space:nowrap}' +
-      '.sl-viewer-btn:hover:not(:disabled){border-color:#00c2ff;color:#00c2ff;background:#1e2235}' +
-      '.sl-viewer-btn svg{width:12px;height:12px;fill:currentColor}' +
-      '.sl-viewer-btn.active{background:#005f8a;color:#fff;border-color:#00c2ff}' +
-      '.sl-viewer-title{font-family:var(--font,monospace);font-size:11px;color:#e4e8f0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}' +
-      '.sl-viewer-spacer{flex:1}' +
-      '.sl-viewer-body{flex:1;overflow:hidden;background:#525659;position:relative}' +
-      '.sl-viewer-body iframe{width:100%;height:100%;border:none;display:block}' +
-      '.sl-viewer-body img{max-width:100%;max-height:100%;display:block;margin:auto;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);box-shadow:0 2px 12px rgba(0,0,0,.5)}' +
-      '.sl-viewer-loading{display:flex;flex-direction:column;align-items:center;justify-content:center;width:100%;height:100%;color:#7a8199;gap:12px}' +
-      '.sl-viewer-spinner{width:36px;height:36px;border:3px solid #2a2d3e;border-top-color:#00c2ff;border-radius:50%;animation:sl-spin .7s linear infinite}' +
-      '@keyframes sl-spin{to{transform:rotate(360deg)}}' +
-      '.sl-viewer-error{color:#ef4444;padding:20px;text-align:center;font-size:12px;width:100%;height:100%;display:flex;align-items:center;justify-content:center}';
+  // ═══════════════════════════════════════════════════════════════
+  //  Abkoppeln-Button in die bestehende Preview-Toolbar injizieren
+  // ═══════════════════════════════════════════════════════════════
+  function injectDetachButton() {
+    if (document.getElementById('sl-detach-btn')) return; // schon da
+
+    var previewHeader = document.querySelector('.preview-header');
+    if (!previewHeader) return;
+
     var style = document.createElement('style');
-    style.id = 'sl-viewer-styles';
-    style.textContent = css;
+    style.textContent =
+      '#sl-detach-btn{background:none;border:1px solid #2a2d3e;border-radius:4px;color:#7a8199;cursor:pointer;padding:3px 8px;font-size:11px;font-family:var(--font-ui,sans-serif);display:inline-flex;align-items:center;gap:3px;transition:all .15s;white-space:nowrap;flex-shrink:0}' +
+      '#sl-detach-btn:hover{border-color:#00c2ff;color:#00c2ff;background:#1e2235}' +
+      '#sl-detach-btn.active{background:#005f8a;color:#fff;border-color:#00c2ff}' +
+      '#sl-detach-btn svg{width:12px;height:12px;fill:currentColor}';
     document.head.appendChild(style);
-  }
 
-  // ═══════════════════════════════════════════════════════════════
-  //  INLINE VIEWER
-  // ═══════════════════════════════════════════════════════════════
-  function buildInlineHTML() {
-    var extLabel = _externalWindow && !_externalWindow.closed ? 'Wieder andocken' : 'Abkoppeln';
-    var extClass = _externalWindow && !_externalWindow.closed ? 'sl-viewer-btn active' : 'sl-viewer-btn';
+    // Button vor dem Close-Button einfügen
+    var closeBtn = previewHeader.querySelector('.preview-close');
+    var btn = document.createElement('button');
+    btn.id = 'sl-detach-btn';
+    btn.title = 'In externem Fenster öffnen';
+    btn.innerHTML =
+      '<svg viewBox="0 0 24 24"><path d="M19 4H5c-1.11 0-2 .9-2 2v12c0 1.1.89 2 2 2h4v-2H5V8h14v10h-4v2h4c1.1 0 2-.9 2-2V6c0-1.1-.89-2-2-2zm-7 6l-4 4h3v6h2v-6h3l-4-4z"/></svg>' +
+      '<span id="sl-detach-label">Abkoppeln</span>';
+    btn.onclick = toggleExternalWindow;
 
-    return '<div class="sl-viewer-toolbar">' +
-      '<span class="sl-viewer-title" id="sl-title"></span>' +
-      '<div class="sl-viewer-spacer"></div>' +
-      '<button class="' + extClass + '" id="sl-detach-external">' +
-        '<svg viewBox="0 0 24 24"><path d="M19 4H5c-1.11 0-2 .9-2 2v12c0 1.1.89 2 2 2h4v-2H5V8h14v10h-4v2h4c1.1 0 2-.9 2-2V6c0-1.1-.89-2-2-2zm-7 6l-4 4h3v6h2v-6h3l-4-4z"/></svg>' +
-        '<span id="sl-detach-label">' + extLabel + '</span>' +
-      '</button>' +
-      '<button class="sl-viewer-btn" id="sl-download">' +
-        '<svg viewBox="0 0 24 24"><path d="M5 20h14v-2H5v2zm7-14v8.17l-2.59-2.58L8 13l4 4 4-4-1.41-1.41L13 14.17V6h-1z"/></svg>' +
-      '</button>' +
-      '</div>' +
-      '<div class="sl-viewer-body" id="sl-body">' +
-        '<div class="sl-viewer-loading"><div class="sl-viewer-spinner"></div><div>Lade…</div></div>' +
-      '</div>';
-  }
-
-  function loadIntoInline(file) {
-    injectStyles();
-    var kind = getFileKind(file.name);
-    if (kind !== 'pdf' && kind !== 'image') return false;
-
-    _currentFile = file;
-
-    var panel = document.getElementById('previewPanel');
-    var handle = document.getElementById('previewResizeHandle');
-    var bodyEl = document.getElementById('previewBody');
-    var titleEl = document.getElementById('previewTitle');
-    var metaEl = document.getElementById('previewMeta');
-    var zoomToolbar = document.getElementById('zoomToolbar');
-
-    if (!panel || !bodyEl) return false;
-    panel.classList.add('open');
-    if (handle) handle.style.display = '';
-    if (titleEl) titleEl.textContent = file.name || 'Vorschau';
-    if (metaEl) metaEl.style.display = 'none';
-    if (zoomToolbar) zoomToolbar.style.display = 'none';
-
-    var container = document.createElement('div');
-    container.className = 'sl-viewer-container';
-    container.innerHTML = buildInlineHTML();
-    bodyEl.innerHTML = '';
-    bodyEl.appendChild(container);
-
-    var slTitle = document.getElementById('sl-title');
-    if (slTitle) slTitle.textContent = file.name;
-
-    var detachBtn = document.getElementById('sl-detach-external');
-    if (detachBtn) detachBtn.onclick = toggleExternalWindow;
-
-    var dlBtn = document.getElementById('sl-download');
-    if (dlBtn) dlBtn.onclick = function() {
-      if (_currentFile) {
-        var idx = allFiles.indexOf(_currentFile);
-        if (idx >= 0 && typeof downloadFile === 'function') downloadFile(idx);
-      }
-    };
-
-    var slBody = document.getElementById('sl-body');
-    var fileId = getFileId(file);
-    if (!fileId) {
-      slBody.innerHTML = '<div class="sl-viewer-error">Keine Datei-ID</div>';
-      return true;
+    if (closeBtn) {
+      previewHeader.insertBefore(btn, closeBtn);
+    } else {
+      previewHeader.appendChild(btn);
     }
-
-    getDownloadUrl(fileId).then(function(signedUrl) {
-      slBody.innerHTML = '';
-
-      if (kind === 'pdf') {
-        // PDF über Worker-Proxy laden (korrekter Content-Type)
-        var proxyUrl = toPdfViewUrl(signedUrl);
-        var iframe = document.createElement('iframe');
-        iframe.src = proxyUrl;
-        iframe.setAttribute('allow', 'fullscreen');
-        slBody.appendChild(iframe);
-      } else {
-        // Bild: signierte URL direkt
-        var img = document.createElement('img');
-        img.src = signedUrl;
-        slBody.appendChild(img);
-      }
-    }).catch(function(e) {
-      console.error('[Viewer] Fehler:', e);
-      slBody.innerHTML = '<div class="sl-viewer-error">Fehler: ' + escHtml(e.message) + '</div>';
-    });
-
-    return true;
-  }
-
-  // ═══════════════════════════════════════════════════════════════
-  //  EXTERNES FENSTER
-  // ═══════════════════════════════════════════════════════════════
-  function toggleExternalWindow() {
-    if (_externalWindow && !_externalWindow.closed) {
-      _externalWindow.close();
-      _externalWindow = null;
-      updateDetachButton();
-      var panel = document.getElementById('previewPanel');
-      var handle = document.getElementById('previewResizeHandle');
-      if (panel) panel.classList.add('open');
-      if (handle) handle.style.display = '';
-      if (_currentFile) loadIntoInline(_currentFile);
-      return;
-    }
-
-    openExternalWindow();
-    var panel = document.getElementById('previewPanel');
-    var handle = document.getElementById('previewResizeHandle');
-    if (panel) panel.classList.remove('open');
-    if (handle) handle.style.display = 'none';
-  }
-
-  function openExternalWindow() {
-    // Platzhalter öffnen
-    var extWin = window.open('', 'sl-viewer-ext', 'width=1200,height=900,menubar=no,toolbar=no,location=no,status=no,resizable=yes,scrollbars=yes');
-    if (!extWin) {
-      alert('Popup blockiert! Bitte erlauben Sie Popups für diese Seite.');
-      return;
-    }
-
-    _externalWindow = extWin;
-    writeExtPlaceholder(extWin);
-
-    if (_currentFile) {
-      loadFileInExternal(_currentFile);
-    }
-
-    var checkClosed = setInterval(function() {
-      if (!_externalWindow || _externalWindow.closed) {
-        clearInterval(checkClosed);
-        _externalWindow = null;
-        updateDetachButton();
-        var p = document.getElementById('previewPanel');
-        var h = document.getElementById('previewResizeHandle');
-        if (p && _currentFile) {
-          p.classList.add('open');
-          if (h) h.style.display = '';
-          loadIntoInline(_currentFile);
-        }
-      }
-    }, 500);
-
-    updateDetachButton();
   }
 
   function updateDetachButton() {
-    var btn = document.getElementById('sl-detach-external');
+    var btn = document.getElementById('sl-detach-btn');
     var label = document.getElementById('sl-detach-label');
     if (!btn || !label) return;
     if (_externalWindow && !_externalWindow.closed) {
@@ -231,102 +88,248 @@
     }
   }
 
-  function writeExtPlaceholder(extWin) {
+  // ═══════════════════════════════════════════════════════════════
+  //  EXTERNES FENSTER
+  //  Bleibt als eigenes HTML-Dokument mit iframe darin
+  //  → iframe-src kann jederzeit aktualisiert werden
+  // ═══════════════════════════════════════════════════════════════
+  function toggleExternalWindow() {
+    if (_externalWindow && !_externalWindow.closed) {
+      // Schließen → Inline wieder zeigen
+      _externalWindow.close();
+      _externalWindow = null;
+      updateDetachButton();
+      var panel = document.getElementById('previewPanel');
+      var handle = document.getElementById('previewResizeHandle');
+      if (panel) panel.classList.add('open');
+      if (handle) handle.style.display = '';
+      return;
+    }
+
+    openExternalWindow();
+
+    // Inline ausblenden
+    var panel = document.getElementById('previewPanel');
+    var handle = document.getElementById('previewResizeHandle');
+    if (panel) panel.classList.remove('open');
+    if (handle) handle.style.display = 'none';
+  }
+
+  function openExternalWindow() {
+    var extWin = window.open('', 'sl-viewer-ext', 'width=1200,height=900,menubar=no,toolbar=no,location=no,status=no,resizable=yes,scrollbars=yes');
+    if (!extWin) {
+      alert('Popup blockiert! Bitte erlauben Sie Popups für diese Seite.');
+      return;
+    }
+
+    _externalWindow = extWin;
+
+    // HTML-Dokument schreiben das dauerhaft bleibt
+    // Enthält: Toolbar + iframe (dessen src wir jederzeit ändern können)
     var doc = extWin.document;
     doc.open();
     doc.write('<!DOCTYPE html><html lang="de"><head><meta charset="UTF-8"><title>S+L Viewer</title><style>' +
       '*{box-sizing:border-box;margin:0;padding:0}' +
-      'body{background:#1a1d27;color:#e4e8f0;font-family:"DM Sans","Segoe UI",sans-serif;height:100vh;display:flex;align-items:center;justify-content:center}' +
-      '.placeholder{display:flex;flex-direction:column;align-items:center;gap:16px;color:#7a8199;text-align:center;padding:40px}' +
+      'body{background:#1a1d27;color:#e4e8f0;font-family:"DM Sans","Segoe UI",sans-serif;height:100vh;display:flex;flex-direction:column;overflow:hidden}' +
+      '.toolbar{display:flex;align-items:center;gap:8px;padding:8px 12px;background:#0f1117;border-bottom:1px solid #2a2d3e;flex-shrink:0}' +
+      '.title{flex:1;font-size:13px;font-weight:600;color:#e4e8f0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-left:8px}' +
+      'button{background:none;border:1px solid #2a2d3e;border-radius:4px;color:#7a8199;cursor:pointer;padding:4px 10px;font-size:12px;font-family:inherit;display:inline-flex;align-items:center;gap:4px;transition:all .15s}' +
+      'button:hover{border-color:#00c2ff;color:#00c2ff;background:#1e2235}' +
+      'button svg{width:14px;height:14px;fill:currentColor}' +
+      '.viewer-frame{flex:1;overflow:hidden;background:#525659}' +
+      '.viewer-frame iframe{width:100%;height:100%;border:none;display:block}' +
+      '.placeholder{display:flex;flex-direction:column;align-items:center;justify-content:center;width:100%;height:100%;color:#7a8199;gap:16px;text-align:center;padding:40px}' +
       '.placeholder svg{width:64px;height:64px;opacity:.3;fill:currentColor}' +
+      '.loading{display:flex;flex-direction:column;align-items:center;justify-content:center;width:100%;height:100%;color:#7a8199;gap:12px}' +
+      '.spinner{width:40px;height:40px;border:3px solid #2a2d3e;border-top-color:#00c2ff;border-radius:50%;animation:spin .7s linear infinite}' +
+      '@keyframes spin{to{transform:rotate(360deg)}}' +
       '</style></head><body>' +
-      '<div class="placeholder"><svg viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>' +
-      '<div>Klicken Sie im Explorer auf das Auge-Symbol<br>um eine Datei hier anzuzeigen</div></div>' +
+      '<div class="toolbar">' +
+        '<svg width="20" height="20" viewBox="0 0 24 24" fill="#00c2ff"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6z"/></svg>' +
+        '<div class="title" id="extTitle">Warte auf Auswahl…</div>' +
+        '<button id="extFullscreen" title="Vollbild (F11)"><svg viewBox="0 0 24 24"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg> Vollbild</button>' +
+      '</div>' +
+      '<div class="viewer-frame" id="extFrame">' +
+        '<div class="placeholder" id="extPlaceholder"><svg viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg><div>Klicken Sie im Explorer auf das Auge-Symbol<br>um eine Datei hier anzuzeigen</div></div>' +
+      '</div>' +
       '</body></html>');
     doc.close();
+
+    // Fullscreen-Button
+    setTimeout(function() {
+      var fsBtn = extWin.document.getElementById('extFullscreen');
+      if (fsBtn) fsBtn.onclick = function() {
+        if (extWin.document.documentElement.requestFullscreen) extWin.document.documentElement.requestFullscreen();
+      };
+    }, 100);
+
+    // Aktuelles File laden falls vorhanden
+    if (_currentFile) {
+      setTimeout(function() {
+        loadFileInExternal(_currentFile);
+      }, 150);
+    }
+
+    // Erkennen wenn Fenster geschlossen wird
+    var checkClosed = setInterval(function() {
+      if (!_externalWindow || _externalWindow.closed) {
+        clearInterval(checkClosed);
+        _externalWindow = null;
+        updateDetachButton();
+        // Inline wieder einblenden
+        var p = document.getElementById('previewPanel');
+        var h = document.getElementById('previewResizeHandle');
+        if (p && _currentFile) {
+          p.classList.add('open');
+          if (h) h.style.display = '';
+        }
+      }
+    }, 500);
+
+    updateDetachButton();
   }
 
   function loadFileInExternal(file) {
     if (!_externalWindow || _externalWindow.closed) return;
 
-    var kind = getFileKind(file.name);
-    if (kind !== 'pdf' && kind !== 'image') {
-      writeExtPlaceholder(_externalWindow);
+    var doc;
+    try { doc = _externalWindow.document; } catch(e) {
+      // Cross-origin — Fenster wurde navigiert, neu öffnen
+      openExternalWindow();
+      setTimeout(function() { loadFileInExternal(file); }, 300);
       return;
     }
 
+    var frame = doc.getElementById('extFrame');
+    var title = doc.getElementById('extTitle');
+    if (!frame) {
+      // DOM nicht mehr verfügbar — Fenster neu schreiben
+      openExternalWindow();
+      setTimeout(function() { loadFileInExternal(file); }, 300);
+      return;
+    }
+
+    var kind = getFileKind(file.name);
+    if (kind !== 'pdf' && kind !== 'image') {
+      frame.innerHTML = '<div class="placeholder"><div>Dieser Dateityp wird nicht unterstützt.</div></div>';
+      if (title) title.textContent = file.name;
+      return;
+    }
+
+    if (title) title.textContent = file.name;
+    _externalWindow.document.title = file.name + ' — S+L Viewer';
+
+    // Loading
+    frame.innerHTML = '<div class="loading"><div class="spinner"></div><div style="font-size:13px">Lade ' + file.name + '…</div></div>';
+
     var fileId = getFileId(file);
-    if (!fileId) return;
+    if (!fileId) {
+      frame.innerHTML = '<div class="placeholder"><div>Keine Datei-ID</div></div>';
+      return;
+    }
 
-    // Loading-Anzeige
-    var doc = _externalWindow.document;
-    doc.open();
-    doc.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>' + escHtml(file.name) + ' — S+L Viewer</title><style>' +
-      '*{margin:0;padding:0}body{background:#1a1d27;color:#7a8199;font-family:sans-serif;height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center}' +
-      '.spinner{width:40px;height:40px;border:3px solid #2a2d3e;border-top-color:#00c2ff;border-radius:50%;animation:spin .7s linear infinite}' +
-      '@keyframes spin{to{transform:rotate(360deg)}}' +
-      '.info{margin-top:12px;font-size:13px}' +
-      '</style></head><body><div class="spinner"></div><div class="info">Lade ' + escHtml(file.name) + '…</div></body></html>');
-    doc.close();
-
-    // Download-URL holen → Worker-Proxy-URL → externes Fenster dorthin navigieren
     getDownloadUrl(fileId).then(function(signedUrl) {
       if (!_externalWindow || _externalWindow.closed) return;
 
+      var extDoc;
+      try { extDoc = _externalWindow.document; } catch(e) { return; }
+      var extFrame = extDoc.getElementById('extFrame');
+      if (!extFrame) return;
+
+      extFrame.innerHTML = '';
+
       if (kind === 'pdf') {
-        // PDF via Worker-Proxy (korrekter Content-Type)
         var proxyUrl = toPdfViewUrl(signedUrl);
-        _externalWindow.location.href = proxyUrl;
+        var iframe = extDoc.createElement('iframe');
+        iframe.src = proxyUrl;
+        iframe.setAttribute('allow', 'fullscreen');
+        iframe.style.width = '100%';
+        iframe.style.height = '100%';
+        iframe.style.border = 'none';
+        extFrame.appendChild(iframe);
       } else {
-        // Bild direkt anzeigen
-        var doc = _externalWindow.document;
-        doc.open();
-        doc.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>' + escHtml(file.name) + '</title><style>' +
-          '*{margin:0;padding:0}body{background:#1a1d27;height:100vh;display:flex;align-items:center;justify-content:center;overflow:auto}' +
-          'img{max-width:100%;max-height:100%;box-shadow:0 4px 20px rgba(0,0,0,.5)}' +
-          '</style></head><body><img src="' + escHtml(signedUrl) + '"></body></html>');
-        doc.close();
+        // Bild
+        var imgWrap = extDoc.createElement('div');
+        imgWrap.style.cssText = 'width:100%;height:100%;display:flex;align-items:center;justify-content:center;overflow:auto;background:#1a1d27';
+        var img = extDoc.createElement('img');
+        img.src = signedUrl;
+        img.style.cssText = 'max-width:100%;max-height:100%;box-shadow:0 4px 20px rgba(0,0,0,.5)';
+        imgWrap.appendChild(img);
+        extFrame.appendChild(imgWrap);
       }
     }).catch(function(e) {
       console.error('[ExtViewer] Fehler:', e);
-      if (_externalWindow && !_externalWindow.closed) {
-        var doc = _externalWindow.document;
-        doc.open();
-        doc.write('<!DOCTYPE html><html><head><style>body{background:#1a1d27;color:#ef4444;display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif}</style></head><body>Fehler: ' + escHtml(e.message) + '</body></html>');
-        doc.close();
-      }
+      try {
+        var extFrame = _externalWindow.document.getElementById('extFrame');
+        if (extFrame) extFrame.innerHTML = '<div class="placeholder" style="color:#ef4444">Fehler: ' + e.message + '</div>';
+      } catch(e2) {}
     });
+  }
+
+  function showExtPlaceholder() {
+    if (!_externalWindow || _externalWindow.closed) return;
+    try {
+      var doc = _externalWindow.document;
+      var frame = doc.getElementById('extFrame');
+      var title = doc.getElementById('extTitle');
+      if (frame) frame.innerHTML = '<div class="placeholder"><svg viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg><div>Klicken Sie im Explorer auf das Auge-Symbol<br>um eine Datei hier anzuzeigen</div></div>';
+      if (title) title.textContent = 'Warte auf Auswahl…';
+    } catch(e) {}
   }
 
   // ═══════════════════════════════════════════════════════════════
   //  HOOKS
   // ═══════════════════════════════════════════════════════════════
+
+  // Detach-Button injizieren sobald Preview-Panel existiert
+  var _btnInjected = false;
+  var _injectInterval = setInterval(function() {
+    if (document.querySelector('.preview-header')) {
+      injectDetachButton();
+      _btnInjected = true;
+      clearInterval(_injectInterval);
+    }
+  }, 500);
+
+  // openPreview überschreiben
   var _origOpenPreview = window.openPreview;
   window.openPreview = function(idx) {
     var file = allFiles[idx];
     if (!file) return;
 
+    _currentFile = file;
+
+    // Detach-Button sicherstellen
+    if (!_btnInjected) injectDetachButton();
+
+    // Externes Fenster aktiv? → dort laden, Inline trotzdem auch laden
     if (_externalWindow && !_externalWindow.closed) {
       var kind = getFileKind(file.name);
       if (kind === 'pdf' || kind === 'image') {
-        _currentFile = file;
         loadFileInExternal(file);
+        // Inline NICHT zeigen wenn extern aktiv
         return;
       }
     }
 
-    var handled = loadIntoInline(file);
-    if (!handled && typeof _origOpenPreview === 'function') {
+    // Normal: Original-Viewer für alle Dateitypen
+    if (typeof _origOpenPreview === 'function') {
       _origOpenPreview(idx);
     }
+
+    // Detach-Button aktualisieren
+    setTimeout(function() {
+      if (!_btnInjected) injectDetachButton();
+      updateDetachButton();
+    }, 100);
   };
 
   var _origClosePreview = window.closePreview;
   window.closePreview = function() {
     _currentFile = null;
-    if (_externalWindow && !_externalWindow.closed) writeExtPlaceholder(_externalWindow);
+    if (_externalWindow && !_externalWindow.closed) showExtPlaceholder();
     if (typeof _origClosePreview === 'function') _origClosePreview();
   };
 
-  console.log('[Viewer] Enhanced Viewer v8 geladen (PDF-Proxy via Worker)');
+  console.log('[Viewer] Enhanced Viewer v9 geladen (Trimble inline + Ext. PDF-Proxy)');
 })();
