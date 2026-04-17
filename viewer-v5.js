@@ -1,13 +1,14 @@
 // ═══════════════════════════════════════════════════════════════
-//  S+L Explorer — Enhanced Viewer v7
-//  Signierte URL direkt im iframe/externem Fenster
+//  S+L Explorer — Enhanced Viewer v8
+//  PDF-Proxy via Worker für korrekten Content-Type
 // ═══════════════════════════════════════════════════════════════
 //
-//  Kein Blob, kein embed — signierte Download-URL direkt nutzen:
-//  - Eingebettet: iframe mit src = signierte URL
-//  - Extern: Fenster navigiert direkt zur signierten URL
-//  - Browser rendert PDF nativ (gestochen scharf)
-//  - Kein Sandbox-Problem
+//  Strategie:
+//  - Signierte URL holen (unverändert!)
+//  - An Worker /pdf-view?url=... weiterleiten
+//  - Worker holt PDF und liefert mit Content-Type: application/pdf
+//  - Browser rendert nativ (gestochen scharf)
+//  - Kein Sandbox-Problem (iframe src = Worker-URL)
 //
 // ═══════════════════════════════════════════════════════════════
 (function() {
@@ -30,15 +31,9 @@
     });
   }
 
-  // Die signierte URL hat response-content-type=application/octet-stream
-  // Wir müssen sie zu application/pdf ändern damit der Browser sie inline rendert
+  // Signierte URL → Worker-Proxy-URL die application/pdf liefert
   function toPdfViewUrl(signedUrl) {
-    // Ersetze response-content-type=application/octet-stream
-    // mit response-content-type=application/pdf
-    return signedUrl
-      .replace('response-content-type=application%2Foctet-stream', 'response-content-type=application%2Fpdf')
-      // Auch content-disposition von attachment zu inline ändern
-      .replace('response-content-disposition=attachment', 'response-content-disposition=inline');
+    return PROXY_URL + '/pdf-view?url=' + encodeURIComponent(signedUrl);
   }
 
   function getFileKind(name) {
@@ -48,9 +43,6 @@
     return 'other';
   }
 
-  // ═══════════════════════════════════════════════════════════════
-  //  CSS
-  // ═══════════════════════════════════════════════════════════════
   function injectStyles() {
     if (document.getElementById('sl-viewer-styles')) return;
     var css =
@@ -128,7 +120,6 @@
     var slTitle = document.getElementById('sl-title');
     if (slTitle) slTitle.textContent = file.name;
 
-    // Toolbar-Events
     var detachBtn = document.getElementById('sl-detach-external');
     if (detachBtn) detachBtn.onclick = toggleExternalWindow;
 
@@ -147,18 +138,18 @@
       return true;
     }
 
-    // Download-URL holen und direkt als iframe-src verwenden
     getDownloadUrl(fileId).then(function(signedUrl) {
       slBody.innerHTML = '';
 
       if (kind === 'pdf') {
-        var viewUrl = toPdfViewUrl(signedUrl);
+        // PDF über Worker-Proxy laden (korrekter Content-Type)
+        var proxyUrl = toPdfViewUrl(signedUrl);
         var iframe = document.createElement('iframe');
-        iframe.src = viewUrl;
+        iframe.src = proxyUrl;
         iframe.setAttribute('allow', 'fullscreen');
         slBody.appendChild(iframe);
       } else {
-        // Bild: signierte URL direkt als img src
+        // Bild: signierte URL direkt
         var img = document.createElement('img');
         img.src = signedUrl;
         slBody.appendChild(img);
@@ -172,14 +163,13 @@
   }
 
   // ═══════════════════════════════════════════════════════════════
-  //  EXTERNES FENSTER (Continuous Preview)
+  //  EXTERNES FENSTER
   // ═══════════════════════════════════════════════════════════════
   function toggleExternalWindow() {
     if (_externalWindow && !_externalWindow.closed) {
       _externalWindow.close();
       _externalWindow = null;
       updateDetachButton();
-      // Inline wieder einblenden
       var panel = document.getElementById('previewPanel');
       var handle = document.getElementById('previewResizeHandle');
       if (panel) panel.classList.add('open');
@@ -189,8 +179,6 @@
     }
 
     openExternalWindow();
-
-    // Inline ausblenden
     var panel = document.getElementById('previewPanel');
     var handle = document.getElementById('previewResizeHandle');
     if (panel) panel.classList.remove('open');
@@ -198,7 +186,7 @@
   }
 
   function openExternalWindow() {
-    // Externes Fenster mit Platzhalter öffnen
+    // Platzhalter öffnen
     var extWin = window.open('', 'sl-viewer-ext', 'width=1200,height=900,menubar=no,toolbar=no,location=no,status=no,resizable=yes,scrollbars=yes');
     if (!extWin) {
       alert('Popup blockiert! Bitte erlauben Sie Popups für diese Seite.');
@@ -206,16 +194,12 @@
     }
 
     _externalWindow = extWin;
-
-    // Platzhalter-HTML schreiben
     writeExtPlaceholder(extWin);
 
-    // Wenn aktuelles File vorhanden: direkt laden
     if (_currentFile) {
       loadFileInExternal(_currentFile);
     }
 
-    // Erkennen wenn Fenster geschlossen wird
     var checkClosed = setInterval(function() {
       if (!_externalWindow || _externalWindow.closed) {
         clearInterval(checkClosed);
@@ -234,23 +218,6 @@
     updateDetachButton();
   }
 
-  function writeExtPlaceholder(extWin) {
-    var doc = extWin.document;
-    doc.open();
-    doc.write('<!DOCTYPE html><html lang="de"><head><meta charset="UTF-8"><title>S+L Viewer</title><style>' +
-      '*{box-sizing:border-box;margin:0;padding:0}' +
-      'body{background:#1a1d27;color:#e4e8f0;font-family:"DM Sans","Segoe UI",sans-serif;height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden}' +
-      '.placeholder{display:flex;flex-direction:column;align-items:center;gap:16px;color:#7a8199;text-align:center;padding:40px}' +
-      '.placeholder svg{width:64px;height:64px;opacity:.3;fill:currentColor}' +
-      '</style></head><body>' +
-      '<div class="placeholder">' +
-        '<svg viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>' +
-        '<div>Klicken Sie im Explorer auf das Auge-Symbol<br>um eine Datei hier anzuzeigen</div>' +
-      '</div>' +
-      '</body></html>');
-    doc.close();
-  }
-
   function updateDetachButton() {
     var btn = document.getElementById('sl-detach-external');
     var label = document.getElementById('sl-detach-label');
@@ -262,6 +229,21 @@
       btn.classList.remove('active');
       label.textContent = 'Abkoppeln';
     }
+  }
+
+  function writeExtPlaceholder(extWin) {
+    var doc = extWin.document;
+    doc.open();
+    doc.write('<!DOCTYPE html><html lang="de"><head><meta charset="UTF-8"><title>S+L Viewer</title><style>' +
+      '*{box-sizing:border-box;margin:0;padding:0}' +
+      'body{background:#1a1d27;color:#e4e8f0;font-family:"DM Sans","Segoe UI",sans-serif;height:100vh;display:flex;align-items:center;justify-content:center}' +
+      '.placeholder{display:flex;flex-direction:column;align-items:center;gap:16px;color:#7a8199;text-align:center;padding:40px}' +
+      '.placeholder svg{width:64px;height:64px;opacity:.3;fill:currentColor}' +
+      '</style></head><body>' +
+      '<div class="placeholder"><svg viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>' +
+      '<div>Klicken Sie im Explorer auf das Auge-Symbol<br>um eine Datei hier anzuzeigen</div></div>' +
+      '</body></html>');
+    doc.close();
   }
 
   function loadFileInExternal(file) {
@@ -276,28 +258,27 @@
     var fileId = getFileId(file);
     if (!fileId) return;
 
-    // Externes Fenster: Loading-State
+    // Loading-Anzeige
     var doc = _externalWindow.document;
     doc.open();
-    doc.write('<!DOCTYPE html><html lang="de"><head><meta charset="UTF-8"><title>' + escHtml(file.name) + ' — S+L Viewer</title><style>' +
-      '*{box-sizing:border-box;margin:0;padding:0}' +
-      'body{background:#1a1d27;color:#e4e8f0;font-family:"DM Sans","Segoe UI",sans-serif;height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center}' +
+    doc.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>' + escHtml(file.name) + ' — S+L Viewer</title><style>' +
+      '*{margin:0;padding:0}body{background:#1a1d27;color:#7a8199;font-family:sans-serif;height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center}' +
       '.spinner{width:40px;height:40px;border:3px solid #2a2d3e;border-top-color:#00c2ff;border-radius:50%;animation:spin .7s linear infinite}' +
       '@keyframes spin{to{transform:rotate(360deg)}}' +
-      '.info{margin-top:12px;color:#7a8199;font-size:13px}' +
+      '.info{margin-top:12px;font-size:13px}' +
       '</style></head><body><div class="spinner"></div><div class="info">Lade ' + escHtml(file.name) + '…</div></body></html>');
     doc.close();
 
-    // Download-URL holen und Fenster direkt dorthin navigieren
+    // Download-URL holen → Worker-Proxy-URL → externes Fenster dorthin navigieren
     getDownloadUrl(fileId).then(function(signedUrl) {
       if (!_externalWindow || _externalWindow.closed) return;
 
       if (kind === 'pdf') {
-        // Direkt zur PDF-URL navigieren — Browser zeigt nativen PDF-Viewer
-        var viewUrl = toPdfViewUrl(signedUrl);
-        _externalWindow.location.href = viewUrl;
+        // PDF via Worker-Proxy (korrekter Content-Type)
+        var proxyUrl = toPdfViewUrl(signedUrl);
+        _externalWindow.location.href = proxyUrl;
       } else {
-        // Bild: In einfachem HTML-Wrapper anzeigen
+        // Bild direkt anzeigen
         var doc = _externalWindow.document;
         doc.open();
         doc.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>' + escHtml(file.name) + '</title><style>' +
@@ -311,7 +292,7 @@
       if (_externalWindow && !_externalWindow.closed) {
         var doc = _externalWindow.document;
         doc.open();
-        doc.write('<!DOCTYPE html><html><head><title>Fehler</title><style>body{background:#1a1d27;color:#ef4444;display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif}</style></head><body>Fehler: ' + escHtml(e.message) + '</body></html>');
+        doc.write('<!DOCTYPE html><html><head><style>body{background:#1a1d27;color:#ef4444;display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif}</style></head><body>Fehler: ' + escHtml(e.message) + '</body></html>');
         doc.close();
       }
     });
@@ -325,7 +306,6 @@
     var file = allFiles[idx];
     if (!file) return;
 
-    // Externes Fenster aktiv? → dort laden
     if (_externalWindow && !_externalWindow.closed) {
       var kind = getFileKind(file.name);
       if (kind === 'pdf' || kind === 'image') {
@@ -335,7 +315,6 @@
       }
     }
 
-    // Inline versuchen
     var handled = loadIntoInline(file);
     if (!handled && typeof _origOpenPreview === 'function') {
       _origOpenPreview(idx);
@@ -345,11 +324,9 @@
   var _origClosePreview = window.closePreview;
   window.closePreview = function() {
     _currentFile = null;
-    if (_externalWindow && !_externalWindow.closed) {
-      writeExtPlaceholder(_externalWindow);
-    }
+    if (_externalWindow && !_externalWindow.closed) writeExtPlaceholder(_externalWindow);
     if (typeof _origClosePreview === 'function') _origClosePreview();
   };
 
-  console.log('[Viewer] Enhanced Viewer v7 geladen (Signierte URL direkt)');
+  console.log('[Viewer] Enhanced Viewer v8 geladen (PDF-Proxy via Worker)');
 })();
