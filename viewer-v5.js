@@ -1,6 +1,6 @@
 // ═══════════════════════════════════════════════════════════════
-//  S+L Explorer — Enhanced Viewer v10
-//  Zwei Abkoppel-Optionen: Trimble Viewer + Nativer PDF-Viewer
+//  S+L Explorer — Enhanced Viewer v11
+//  Fix: Trimble Viewer Token + "Abkoppeln mit:" Label
 // ═══════════════════════════════════════════════════════════════
 (function() {
 
@@ -8,9 +8,8 @@
   var TC_BASE = 'https://app21.connect.trimble.com';
 
   var _currentFile = null;
-  var _currentFileIdx = -1;
-  var _extTrimble = null;   // Externes Fenster: Trimble Viewer
-  var _extNative = null;    // Externes Fenster: Nativer PDF-Viewer
+  var _extTrimble = null;
+  var _extNative = null;
 
   function getDownloadUrl(fileId) {
     return fetch(PROXY_URL + '/core-fs/' + fileId + '/downloadurl?base=' + TC_BASE, {
@@ -36,12 +35,13 @@
   }
 
   // ═══════════════════════════════════════════════════════════════
-  //  CSS für Buttons
+  //  CSS
   // ═══════════════════════════════════════════════════════════════
   function injectStyles() {
     if (document.getElementById('sl-viewer-styles')) return;
     var css =
-      '.sl-detach-wrap{display:flex;gap:3px;flex-shrink:0}' +
+      '.sl-detach-wrap{display:flex;align-items:center;gap:4px;flex-shrink:0}' +
+      '.sl-detach-hint{font-size:10px;color:#7a8199;white-space:nowrap;flex-shrink:0}' +
       '.sl-dbtn{background:none;border:1px solid #2a2d3e;border-radius:4px;color:#7a8199;cursor:pointer;padding:3px 7px;font-size:10px;font-family:var(--font-ui,sans-serif);display:inline-flex;align-items:center;gap:3px;transition:all .15s;white-space:nowrap;flex-shrink:0}' +
       '.sl-dbtn:hover{border-color:#00c2ff;color:#00c2ff;background:#1e2235}' +
       '.sl-dbtn.active{background:#005f8a;color:#fff;border-color:#00c2ff}' +
@@ -53,7 +53,7 @@
   }
 
   // ═══════════════════════════════════════════════════════════════
-  //  Buttons in Preview-Toolbar injizieren
+  //  Buttons in Preview-Toolbar
   // ═══════════════════════════════════════════════════════════════
   function injectDetachButtons() {
     if (document.getElementById('sl-detach-wrap')) return;
@@ -67,35 +67,33 @@
     wrap.className = 'sl-detach-wrap';
     wrap.id = 'sl-detach-wrap';
 
-    // Button 1: Trimble Viewer (gleich wie eingebettet)
-    var btnTrimble = document.createElement('button');
-    btnTrimble.className = 'sl-dbtn';
-    btnTrimble.id = 'sl-detach-trimble';
-    btnTrimble.title = 'In externem Fenster öffnen (Trimble Viewer)';
-    btnTrimble.innerHTML =
-      '<svg viewBox="0 0 24 24"><path d="M19 4H5c-1.11 0-2 .9-2 2v12c0 1.1.89 2 2 2h4v-2H5V8h14v10h-4v2h4c1.1 0 2-.9 2-2V6c0-1.1-.89-2-2-2zm-7 6l-4 4h3v6h2v-6h3l-4-4z"/></svg>' +
-      '<span id="sl-label-trimble">Trimble</span>';
-    btnTrimble.onclick = function() { toggleExtTrimble(); };
+    // Hinweistext
+    var hint = document.createElement('span');
+    hint.className = 'sl-detach-hint';
+    hint.textContent = 'Abkoppeln mit:';
+    wrap.appendChild(hint);
 
-    // Button 2: Nativer PDF-Viewer
-    var btnNative = document.createElement('button');
-    btnNative.className = 'sl-dbtn';
-    btnNative.id = 'sl-detach-native';
-    btnNative.title = 'In externem Fenster öffnen (Nativer PDF-Viewer — schärfer, mit Suche)';
-    btnNative.innerHTML =
-      '<svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6zm-1 1.5L18.5 9H13V3.5zM8 13h8v1H8v-1zm0 3h8v1H8v-1zm0-6h4v1H8v-1z"/></svg>' +
-      '<span id="sl-label-native">Nativ</span>';
-    btnNative.onclick = function() { toggleExtNative(); };
+    // Button Trimble
+    var btnT = document.createElement('button');
+    btnT.className = 'sl-dbtn';
+    btnT.id = 'sl-detach-trimble';
+    btnT.title = 'Externes Fenster mit Trimble Viewer (gleiche Ansicht wie eingebettet)';
+    btnT.innerHTML = '<svg viewBox="0 0 24 24"><path d="M19 4H5c-1.11 0-2 .9-2 2v12c0 1.1.89 2 2 2h4v-2H5V8h14v10h-4v2h4c1.1 0 2-.9 2-2V6c0-1.1-.89-2-2-2zm-7 6l-4 4h3v6h2v-6h3l-4-4z"/></svg><span id="sl-label-trimble">Trimble</span>';
+    btnT.onclick = function() { toggleExtTrimble(); };
+    wrap.appendChild(btnT);
 
-    wrap.appendChild(btnTrimble);
-    wrap.appendChild(btnNative);
+    // Button Nativ
+    var btnN = document.createElement('button');
+    btnN.className = 'sl-dbtn';
+    btnN.id = 'sl-detach-native';
+    btnN.title = 'Externes Fenster mit nativem Browser-PDF-Viewer (schärfer, mit Strg+F Suche)';
+    btnN.innerHTML = '<svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6zm-1 1.5L18.5 9H13V3.5zM8 13h8v1H8v-1zm0 3h8v1H8v-1zm0-6h4v1H8v-1z"/></svg><span id="sl-label-native">Nativ</span>';
+    btnN.onclick = function() { toggleExtNative(); };
+    wrap.appendChild(btnN);
 
     var closeBtn = previewHeader.querySelector('.preview-close');
-    if (closeBtn) {
-      previewHeader.insertBefore(wrap, closeBtn);
-    } else {
-      previewHeader.appendChild(wrap);
-    }
+    if (closeBtn) previewHeader.insertBefore(wrap, closeBtn);
+    else previewHeader.appendChild(wrap);
   }
 
   function updateButtons() {
@@ -115,9 +113,9 @@
   }
 
   // ═══════════════════════════════════════════════════════════════
-  //  EXTERNES FENSTER: TRIMBLE VIEWER
-  //  Nutzt den Trimble 2D-Viewer in einem iframe (gleiche Ansicht
-  //  wie eingebettet, aber in eigenem Fenster)
+  //  TRIMBLE VIEWER — EXTERNES FENSTER
+  //  Öffnet die Trimble Viewer-URL direkt im Fenster
+  //  (nicht als iframe in eigenem HTML — vermeidet Token-Probleme)
   // ═══════════════════════════════════════════════════════════════
   function toggleExtTrimble() {
     if (_extTrimble && !_extTrimble.closed) {
@@ -130,13 +128,15 @@
   }
 
   function openExtTrimble() {
-    var extWin = window.open('', 'sl-viewer-trimble', 'width=1200,height=900,menubar=no,toolbar=no,location=no,status=no,resizable=yes,scrollbars=yes');
+    var extWin = window.open('about:blank', 'sl-viewer-trimble', 'width=1200,height=900,menubar=no,toolbar=no,location=no,status=no,resizable=yes,scrollbars=yes');
     if (!extWin) { alert('Popup blockiert!'); return; }
     _extTrimble = extWin;
 
-    writeExtShell(extWin, 'Trimble Viewer');
-
-    if (_currentFile) setTimeout(function() { loadTrimbleInExternal(_currentFile); }, 150);
+    if (_currentFile) {
+      loadTrimbleInExternal(_currentFile);
+    } else {
+      writeExtPlaceholder(extWin, 'Trimble Viewer');
+    }
 
     watchClose(function() { return _extTrimble; }, function() { _extTrimble = null; updateButtons(); });
     updateButtons();
@@ -145,47 +145,22 @@
   function loadTrimbleInExternal(file) {
     if (!_extTrimble || _extTrimble.closed) return;
 
-    var doc;
-    try { doc = _extTrimble.document; } catch(e) { return; }
-
-    var frame = doc.getElementById('extFrame');
-    var title = doc.getElementById('extTitle');
-    if (!frame) return;
-
-    if (title) { title.textContent = file.name; _extTrimble.document.title = file.name + ' — Trimble Viewer'; }
-
-    frame.innerHTML = '<div class="loading"><div class="spinner"></div><div style="font-size:13px">Lade ' + escHtml(file.name) + '…</div></div>';
-
     var fileId = getFileId(file);
     var versionId = file.versionId || fileId;
-    if (!fileId) { frame.innerHTML = '<div class="placeholder"><div>Keine Datei-ID</div></div>'; return; }
+    if (!fileId) return;
 
-    // Trimble 2D-Viewer URL bauen (gleich wie im Inline-Viewer)
+    // Trimble Viewer URL — DIREKT als Fenster-URL navigieren
+    // So bekommt der Viewer die volle Browser-Session inkl. Cookies
     var viewerUrl = 'https://web.connect.trimble.com/projects/' + projectId +
       '/viewer/2D?id=' + versionId + '&version=' + versionId +
-      '&type=revisions&etag=' + versionId + '&isEmbedded=true';
+      '&type=revisions&etag=' + versionId;
 
-    frame.innerHTML = '';
-    var iframe = doc.createElement('iframe');
-    iframe.src = viewerUrl;
-    iframe.setAttribute('allow', 'fullscreen');
-    iframe.style.cssText = 'width:100%;height:100%;border:none';
-    frame.appendChild(iframe);
-
-    // Token an den Viewer-iframe übergeben (wie im Inline-Code)
-    iframe.onload = function() {
-      try {
-        iframe.contentWindow.postMessage({
-          type: 'accessToken',
-          token: accessToken,
-        }, '*');
-      } catch(e) {}
-    };
+    _extTrimble.location.href = viewerUrl;
   }
 
   // ═══════════════════════════════════════════════════════════════
-  //  EXTERNES FENSTER: NATIVER PDF-VIEWER
-  //  Nutzt den Browser-eigenen PDF-Renderer via Worker-Proxy
+  //  NATIVER PDF-VIEWER — EXTERNES FENSTER
+  //  Bleibt als eigenes HTML mit iframe (Continuous Preview)
   // ═══════════════════════════════════════════════════════════════
   function toggleExtNative() {
     if (_extNative && !_extNative.closed) {
@@ -270,7 +245,7 @@
   }
 
   // ═══════════════════════════════════════════════════════════════
-  //  SHARED: Fenster-Shell HTML + Watchdog
+  //  SHARED HELPERS
   // ═══════════════════════════════════════════════════════════════
   function writeExtShell(extWin, subtitle) {
     var doc = extWin.document;
@@ -314,13 +289,23 @@
     }, 100);
   }
 
+  function writeExtPlaceholder(extWin, subtitle) {
+    writeExtShell(extWin, subtitle || '');
+  }
+
+  function showExtPlaceholder(extWin) {
+    try {
+      var frame = extWin.document.getElementById('extFrame');
+      var title = extWin.document.getElementById('extTitle');
+      if (frame) frame.innerHTML = '<div class="placeholder"><svg viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg><div>Klicken Sie im Explorer auf das Auge-Symbol<br>um eine Datei hier anzuzeigen</div></div>';
+      if (title) title.textContent = 'Warte auf Auswahl…';
+    } catch(e) {}
+  }
+
   function watchClose(getWin, onClosed) {
     var interval = setInterval(function() {
       var w = getWin();
-      if (!w || w.closed) {
-        clearInterval(interval);
-        onClosed();
-      }
+      if (!w || w.closed) { clearInterval(interval); onClosed(); }
     }, 500);
   }
 
@@ -342,24 +327,24 @@
     if (!file) return;
 
     _currentFile = file;
-    _currentFileIdx = idx;
 
     if (!_btnInjected) injectDetachButtons();
 
-    // Offene externe Fenster aktualisieren
     var extActive = false;
 
+    // Trimble-Fenster aktualisieren
     if (_extTrimble && !_extTrimble.closed) {
       loadTrimbleInExternal(file);
       extActive = true;
     }
 
+    // Nativ-Fenster aktualisieren
     if (_extNative && !_extNative.closed) {
       loadNativeInExternal(file);
       extActive = true;
     }
 
-    // Wenn ein externes Fenster aktiv: Inline-Vorschau NICHT öffnen
+    // Wenn externes Fenster aktiv: Inline überspringen
     if (extActive) return;
 
     // Normal: Original-Viewer
@@ -376,18 +361,17 @@
   var _origClosePreview = window.closePreview;
   window.closePreview = function() {
     _currentFile = null;
-    // Externe Fenster: Platzhalter zeigen
-    [_extTrimble, _extNative].forEach(function(w) {
-      if (!w || w.closed) return;
-      try {
-        var frame = w.document.getElementById('extFrame');
-        var title = w.document.getElementById('extTitle');
-        if (frame) frame.innerHTML = '<div class="placeholder"><svg viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg><div>Klicken Sie im Explorer auf das Auge-Symbol<br>um eine Datei hier anzuzeigen</div></div>';
-        if (title) title.textContent = 'Warte auf Auswahl…';
-      } catch(e) {}
-    });
+
+    // Trimble-Fenster: Wir können nach Navigation nicht mehr auf das DOM zugreifen
+    // → nichts tun, der Viewer bleibt einfach stehen
+
+    // Nativ-Fenster: Platzhalter zeigen
+    if (_extNative && !_extNative.closed) {
+      showExtPlaceholder(_extNative);
+    }
+
     if (typeof _origClosePreview === 'function') _origClosePreview();
   };
 
-  console.log('[Viewer] Enhanced Viewer v10 geladen (Trimble + Nativ)');
+  console.log('[Viewer] Enhanced Viewer v11 geladen (Trimble direkt + Nativ Proxy)');
 })();
