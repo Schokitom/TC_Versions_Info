@@ -1,6 +1,6 @@
 // ═══════════════════════════════════════════════════════════════
-//  S+L Explorer — Volltextsuche v9
-//  Indexiert nur aktuell gefilterte Dateien (Filter bauen aufeinander auf)
+//  S+L Explorer — Volltextsuche v10
+//  Indexiert nur sichtbare Dateien (basierend auf DOM-Sichtbarkeit)
 // ═══════════════════════════════════════════════════════════════
 (function() {
 
@@ -15,16 +15,15 @@
   var FONT_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/standard_fonts/';
 
   var _pdfjsLib = null;
-  var _ftsCache = {};          // Persistenter Cache: { fileId: { text, pages, src } }
+  var _ftsCache = {};
   var _indexing = false;
   var _abort = null;
   var _progress = { done: 0, total: 0, cached: 0, extracted: 0, errors: 0 };
   var _libId = null;
   var _defReady = false;
-  var _indexedFileIds = {};    // IDs der Dateien die beim letzten Indexlauf indexiert wurden
+  var _indexedFileIds = {};
   var _ftsSearchVisible = false;
 
-  // ─── PDF.js ───
   function loadPdfJs() {
     if (_pdfjsLib) return Promise.resolve(_pdfjsLib);
     return import(PDFJS_URL).then(function(lib) {
@@ -40,7 +39,6 @@
     }).promise;
   }
 
-  // ─── PSet API ───
   function psetFetch(path, method, body) {
     var opts = {
       method: method || 'GET',
@@ -88,7 +86,6 @@
       .catch(function() { return false; });
   }
 
-  // ─── Download + Textextraktion ───
   function getDownloadUrl(fileId) {
     return fetch(PROXY_URL + '/core-fs/' + fileId + '/downloadurl?base=' + TC_BASE, {
       headers: { 'Authorization': 'Bearer ' + accessToken },
@@ -122,23 +119,34 @@
   }
 
   // ═══════════════════════════════════════════════════════════════
-  //  AKTUELL SICHTBARE PDFs ermitteln
-  //  Basiert auf allFiles (bereits durch Dateinamen-Filter,
-  //  Dateiart-Filter und Ordner-Auswahl gefiltert)
+  //  SICHTBARE PDFs ermitteln — basierend auf DOM
+  //  Die Filterung im Explorer passiert nur visuell (tr.style.display)
+  //  allFiles wird NICHT reduziert, deshalb müssen wir die sichtbaren
+  //  Tabellenzeilen auslesen und deren Index in allFiles ermitteln.
   // ═══════════════════════════════════════════════════════════════
   function getVisiblePdfFiles() {
-    return allFiles.filter(function(f) {
-      return f.name && f.name.toLowerCase().endsWith('.pdf');
-    });
-  }
+    var visibleFiles = [];
+    var rows = document.querySelectorAll('#tableBody tr');
+    rows.forEach(function(tr) {
+      if (tr.style.display === 'none') return;
 
-  function getVisiblePdfFileIds() {
-    var ids = {};
-    getVisiblePdfFiles().forEach(function(f) {
-      var id = getFileId(f);
-      if (id) ids[id] = true;
+      // Index aus den Buttons in der Zeile extrahieren (onclick="openFile(X)")
+      // oder aus dem prev-btn ID (prev-btn-X)
+      var prevBtn = tr.querySelector('.prev-btn');
+      if (!prevBtn) return;
+      var btnId = prevBtn.id || '';
+      var match = btnId.match(/prev-btn-(\d+)/);
+      if (!match) return;
+      var idx = parseInt(match[1], 10);
+      if (isNaN(idx) || idx < 0 || idx >= allFiles.length) return;
+
+      var file = allFiles[idx];
+      if (!file) return;
+      if (!file.name || !file.name.toLowerCase().endsWith('.pdf')) return;
+
+      visibleFiles.push(file);
     });
-    return ids;
+    return visibleFiles;
   }
 
   // ─── Indexierung ───
@@ -146,13 +154,11 @@
     var fileId = getFileId(file);
     if (!fileId) return Promise.resolve();
 
-    // Schon im lokalen Cache?
     if (_ftsCache[fileId] && _ftsCache[fileId].text) {
       _progress.cached++;
       return Promise.resolve();
     }
 
-    // PSet-Cache prüfen
     return readPSetCache(fileId).then(function(cached) {
       if (cached && cached.fulltext) {
         _ftsCache[fileId] = { text: cached.fulltext, pages: cached.page_count || 0, src: 'pset' };
@@ -178,23 +184,25 @@
   function startIndexing() {
     if (_indexing) return;
 
-    // Aktuell sichtbare PDFs ermitteln
+    // Sichtbare PDFs aus dem DOM ermitteln
     var pdfFiles = getVisiblePdfFiles();
+
+    console.log('[FTS] Sichtbare PDFs:', pdfFiles.length, '(von', allFiles.length, 'gesamt)');
 
     if (pdfFiles.length === 0) {
       updateFtsButton('error', 'Keine PDFs in der aktuellen Ansicht');
       return;
     }
 
-    // Prüfen ob alle sichtbaren PDFs bereits im Cache sind
+    // Prüfen ob alle schon im lokalen Cache
     var allCached = pdfFiles.every(function(f) {
       var id = getFileId(f);
       return id && _ftsCache[id] && _ftsCache[id].text;
     });
 
     if (allCached) {
-      // Alles schon gecacht → sofort Suchleiste zeigen
-      _indexedFileIds = getVisiblePdfFileIds();
+      _indexedFileIds = {};
+      pdfFiles.forEach(function(f) { var id = getFileId(f); if (id) _indexedFileIds[id] = true; });
       updateFtsButton('ready', pdfFiles.length + ' PDFs aus Cache');
       showFtsSearch();
       return;
@@ -218,7 +226,8 @@
       function nextBatch() {
         if (_abort.stopped || i >= pdfFiles.length) {
           _indexing = false;
-          _indexedFileIds = getVisiblePdfFileIds();
+          _indexedFileIds = {};
+          pdfFiles.forEach(function(f) { var id = getFileId(f); if (id) _indexedFileIds[id] = true; });
           var msg = _progress.extracted + ' neu, ' + _progress.cached + ' Cache (' + pdfFiles.length + ' PDFs)';
           updateFtsButton('ready', msg);
           showFtsSearch();
@@ -238,18 +247,17 @@
     });
   }
 
-  // ─── Suche — nur in den indexierten (= gefilterten) Dateien ───
+  // ─── Suche ───
   function ftsSearch(query) {
     if (!query || query.length < 2) return [];
     var terms = query.toLowerCase().split(/\s+/).filter(function(t) { return t.length >= 2; });
     var results = [];
 
-    // Nur in den Dateien suchen die beim letzten Indexlauf dabei waren
     for (var fi = 0; fi < allFiles.length; fi++) {
       var file = allFiles[fi];
       var fileId = getFileId(file);
       if (!fileId) continue;
-      if (!_indexedFileIds[fileId]) continue; // Nicht indexiert → überspringen
+      if (!_indexedFileIds[fileId]) continue;
 
       var entry = _ftsCache[fileId];
       if (!entry || !entry.text) continue;
@@ -297,8 +305,7 @@
     tbody.innerHTML = '';
 
     if (results.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:40px;color:#7a8199">' +
-        'Keine Treffer f\u00fcr "' + escHtml(query) + '" im PDF-Inhalt</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:40px;color:#7a8199">Keine Treffer f\u00fcr "' + escHtml(query) + '" im PDF-Inhalt</td></tr>';
       setStatus('ok', '0 Volltexttreffer');
       return;
     }
@@ -471,7 +478,6 @@
   function checkForFileChanges() {
     var sig = getBaseFilesSignature();
     if (_lastBaseFilesSignature !== null && sig !== _lastBaseFilesSignature) {
-      // Dateien haben sich geändert → Suchleiste ausblenden, Button zurücksetzen
       hideFtsSearch();
       _indexedFileIds = {};
       updateFtsButton('default', '');
@@ -482,7 +488,7 @@
   setInterval(checkForFileChanges, 500);
 
   // ═══════════════════════════════════════════════════════════════
-  //  INIT + filterTable Hook
+  //  INIT
   // ═══════════════════════════════════════════════════════════════
   function init() {
     var toolbar = document.getElementById('toolbar');
@@ -493,7 +499,6 @@
     if (searchInput) {
       searchInput.removeAttribute('oninput');
       searchInput.addEventListener('input', function() {
-        // Bei Eingabe in der Dateinamen-Suche: FTS-Suchleiste ausblenden
         if (_ftsSearchVisible) {
           hideFtsSearch();
           _indexedFileIds = {};
@@ -530,11 +535,10 @@
 
   window.filterTable = _doFilter;
   window.fulltextSearch = ftsSearch;
-  window.renderFtsResults = renderFtsResults;
   window.ftsCache = _ftsCache;
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else setTimeout(init, 500);
 
-  console.log('[FTS] Volltextsuche v9 geladen (Filter bauen aufeinander auf)');
+  console.log('[FTS] Volltextsuche v10 geladen (DOM-basierte Sichtbarkeit)');
 })();
