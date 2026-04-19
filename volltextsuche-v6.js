@@ -547,8 +547,41 @@
   window.fulltextSearch = ftsSearch;
   window.ftsCache = _ftsCache;
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
-  else setTimeout(init, 500);
+  // ═══════════════════════════════════════════════════════════════
+  //  LIVE-ZÄHLER: totalCount immer auf sichtbare Zeilen aktualisieren
+  //  Funktioniert für ALLE Filter (Name, Typ, Pfad, Gesamtsuche, FTS)
+  // ═══════════════════════════════════════════════════════════════
+  function updateVisibleCount() {
+    var el = document.getElementById('totalCount');
+    if (!el) return;
+    var rows = document.querySelectorAll('#tableBody tr');
+    var count = 0;
+    rows.forEach(function(tr) {
+      // Leere Info-Zeilen (z.B. "Keine Treffer") nicht zählen
+      if (tr.style.display === 'none') return;
+      if (tr.querySelector('td[colspan]')) return;
+      count++;
+    });
+    el.textContent = count;
+  }
+
+  // MutationObserver: Zählt nach jeder Änderung am tableBody
+  function setupCountObserver() {
+    var tbody = document.getElementById('tableBody');
+    if (!tbody) return;
+    var observer = new MutationObserver(function() {
+      // Kurz warten damit renderTable() fertig ist (display:none wird nach innerHTML gesetzt)
+      setTimeout(updateVisibleCount, 50);
+    });
+    observer.observe(tbody, { childList: true, subtree: true, attributes: true, attributeFilter: ['style'] });
+
+    // Auch bei Scroll-Events prüfen (für den Fall dass renderTable display ändert)
+    // Initial zählen
+    setTimeout(updateVisibleCount, 500);
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function() { init(); setupCountObserver(); });
+  else setTimeout(function() { init(); setupCountObserver(); }, 500);
 
   console.log('[FTS] Volltextsuche v10 geladen (DOM-basierte Sichtbarkeit)');
 })();
