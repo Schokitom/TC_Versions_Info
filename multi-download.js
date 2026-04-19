@@ -1,7 +1,11 @@
 /* ============================================================
- *  S+L Explorer — Multi-Download (ZIP)  v1.3
+ *  S+L Explorer — Multi-Download (ZIP)  v1.4
  *  <script src="multi-download.js"></script>
  *  Abhängigkeit: JSZip (wird automatisch geladen)
+ *
+ *  WICHTIG: allFiles / getFileId sind NICHT auf window verfügbar
+ *  (Closure-Scope in index.html). Datei-Infos werden daher
+ *  komplett aus dem DOM extrahiert.
  * ============================================================ */
 (function () {
   'use strict';
@@ -10,8 +14,7 @@
   var TC_BASE   = 'https://app21.connect.trimble.com';
   var JSZIP_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
 
-  // State: selectedRows = { "prev-btn-idx": true }
-  var selectedRows  = {};
+  var selectedRows  = {};   // { key: { fileId, name } }
   var dlBarEl       = null;
   var progressEl    = null;
   var isDownloading = false;
@@ -92,10 +95,7 @@
   function hideProgress() { if (progressEl) progressEl.style.display = 'none'; }
 
   // ── Auswahl ────────────────────────────────────────────────
-  function getSelectedCount() {
-    var n = 0; for (var k in selectedRows) if (selectedRows[k]) n++;
-    return n;
-  }
+  function getSelectedCount() { return Object.keys(selectedRows).length; }
 
   function updateBar() {
     var count = getSelectedCount();
@@ -114,8 +114,8 @@
     }
   }
 
-  function toggleRow(key, checked, row) {
-    if (checked) selectedRows[key] = true;
+  function toggleRow(key, fileInfo, checked, row) {
+    if (checked) selectedRows[key] = fileInfo;
     else delete selectedRows[key];
     if (row) row.classList.toggle('md-selected', !!checked);
     updateBar();
@@ -130,7 +130,6 @@
     updateBar();
   }
 
-  /** Gibt die Keys aller sichtbaren Zeilen zurück */
   function getVisibleRowKeys() {
     var result = [];
     var cbs = document.querySelectorAll('.md-row-cb');
@@ -145,9 +144,89 @@
   }
 
   // ══════════════════════════════════════════════════════════
-  //  Tabelle patchen: Checkboxen IMMER einfügen
-  //  Key = prev-btn-Index (wie v1.0), Datei-Info wird erst
-  //  beim Download aufgelöst.
+  //  DOM-basierte Datei-Info Extraktion
+  //  allFiles ist NICHT auf window → alles aus dem DOM holen
+  // ══════════════════════════════════════════════════════════
+
+  /**
+   * Extrahiert fileId und Dateiname aus einer Tabellenzeile.
+   * Durchsucht alle Buttons (dl-btn, prev-btn) nach onclick-Attributen
+   * die eine File-ID enthalten.
+   */
+  function extractFileInfoFromRow(row) {
+    var name = getNameFromRow(row);
+
+    // Strategie: Alle Buttons/Links in der Zeile nach onclick durchsuchen
+    var buttons = row.querySelectorAll('button, a');
+    for (var i = 0; i < buttons.length; i++) {
+      var btn = buttons[i];
+      var oc = btn.getAttribute('onclick') || '';
+      if (!oc) continue;
+
+      // Suche alle String-Argumente im onclick
+      // Pattern: Funktion('arg1', 'arg2', ...) oder Funktion("arg1", ...)
+      var allStrings = [];
+      var re = /['"]([^'"]+)['"]/g;
+      var match;
+      while ((match = re.exec(oc)) !== null) {
+        allStrings.push(match[1]);
+      }
+
+      // Die fileId ist typischerweise ein alphanumerischer String mit
+      // Bindestrichen/Unterstrichen, 8-30 Zeichen lang (z.B. "M2F87bPwc3w")
+      for (var j = 0; j < allStrings.length; j++) {
+        var candidate = allStrings[j];
+        if (/^[A-Za-z0-9_-]{8,30}$/.test(candidate)) {
+          // Prüfen ob es nicht ein Dateiname ist (hat Punkt + Extension)
+          if (candidate.indexOf('.') === -1) {
+            return { fileId: candidate, name: name || 'unbenannt' };
+          }
+        }
+      }
+    }
+
+    // Strategie 2: data-Attribute auf Buttons
+    for (var k = 0; k < buttons.length; k++) {
+      var fid = buttons[k].getAttribute('data-fileid') ||
+                buttons[k].getAttribute('data-id') ||
+                buttons[k].getAttribute('data-version-id');
+      if (fid) return { fileId: fid, name: name || 'unbenannt' };
+    }
+
+    // Strategie 3: Links mit fileId in der URL
+    var links = row.querySelectorAll('a[href]');
+    for (var l = 0; l < links.length; l++) {
+      var href = links[l].getAttribute('href') || '';
+      var hMatch = href.match(/\/files?\/([A-Za-z0-9_-]{8,30})/);
+      if (hMatch) return { fileId: hMatch[1], name: name || 'unbenannt' };
+    }
+
+    console.warn('[multi-download] Keine fileId in Zeile gefunden. Buttons:', 
+      Array.from(buttons).map(function(b) { 
+        return { tag: b.tagName, onclick: b.getAttribute('onclick'), id: b.id, cls: b.className }; 
+      })
+    );
+    return null;
+  }
+
+  function getNameFromRow(row) {
+    var tds = row.querySelectorAll('td');
+    for (var i = 0; i < tds.length; i++) {
+      if (tds[i].classList.contains('md-cb-td')) continue;
+      if (tds[i].classList.contains('actions-td')) continue;
+      // Erste nicht-Checkbox, nicht-Actions Zelle = Dateiname
+      var el = tds[i].querySelector('.file-name, a, span');
+      var t = el ? el.textContent.trim() : '';
+      // Prüfen ob es wie ein Dateiname aussieht (hat Punkt + Extension)
+      if (t && /\.\w{2,5}$/.test(t)) return t;
+      // Oder einfach nicht-leerer Text
+      if (t && t.length > 1) return t;
+    }
+    return null;
+  }
+
+  // ══════════════════════════════════════════════════════════
+  //  Tabelle patchen
   // ══════════════════════════════════════════════════════════
 
   function patchTable() {
@@ -157,13 +236,12 @@
     var tbody = table.querySelector('tbody') || document.getElementById('tableBody');
     if (!thead || !tbody) return;
 
-    // Sync-Check: wenn tbody keine Checkboxen hat, thead-CB entfernen
-    var firstRow   = tbody.querySelector('tr');
+    // Sync: wenn tbody keine CBs hat, thead-CB auch entfernen
+    var firstRow = tbody.querySelector('tr');
     var tbodyHasCb = firstRow && firstRow.querySelector('.md-cb-td');
     var theadHasCb = thead.querySelector('.md-cb-th');
     if (theadHasCb && !tbodyHasCb && firstRow) {
       theadHasCb.remove();
-      theadHasCb = null;
     }
 
     // Header-Checkbox
@@ -181,7 +259,9 @@
           var r = cbs[i].closest('tr');
           if (r && r.style.display !== 'none') {
             cbs[i].checked = checked;
-            toggleRow(cbs[i].getAttribute('data-key'), checked, r);
+            var key = cbs[i].getAttribute('data-key');
+            var info = cbs[i]._mdFileInfo;
+            if (key && info) toggleRow(key, info, checked, r);
           }
         }
       });
@@ -189,31 +269,40 @@
       thead.insertBefore(th, thead.firstChild);
     }
 
-    // Zeilen-Checkboxen — IMMER einfügen, für jede Zeile
+    // Zeilen-Checkboxen
     var rows = tbody.querySelectorAll('tr');
     for (var i = 0; i < rows.length; i++) {
       var row = rows[i];
       if (row.querySelector('.md-cb-td')) continue;
 
-      // Key aus prev-btn ermitteln (oder Laufindex als Fallback)
       var prevBtn = row.querySelector('[id^="prev-btn-"]');
-      var key = prevBtn
-        ? prevBtn.id.replace('prev-btn-', '')
-        : ('row-' + i);
+      var key = prevBtn ? prevBtn.id.replace('prev-btn-', '') : ('row-' + i);
+
+      // Datei-Info aus dem DOM extrahieren
+      var fileInfo = extractFileInfoFromRow(row);
 
       var td = document.createElement('td');
       td.className = 'md-cb-td';
 
+      // Checkbox immer einfügen (Spaltenausrichtung),
+      // aber nur klickbar wenn fileInfo vorhanden
       var cb = document.createElement('input');
       cb.type = 'checkbox';
       cb.className = 'md-row-cb';
       cb.setAttribute('data-key', key);
-      cb.checked = !!selectedRows[key];
-      if (cb.checked) row.classList.add('md-selected');
 
-      cb.addEventListener('change', (function (k, r) {
-        return function () { toggleRow(k, this.checked, r); };
-      })(key, row));
+      if (fileInfo) {
+        cb._mdFileInfo = fileInfo;
+        cb.checked = !!selectedRows[key];
+        if (cb.checked) row.classList.add('md-selected');
+        cb.addEventListener('change', (function (k, info, r) {
+          return function () { toggleRow(k, info, this.checked, r); };
+        })(key, fileInfo, row));
+      } else {
+        // Kein fileInfo → Checkbox deaktivieren
+        cb.disabled = true;
+        cb.title = 'Datei konnte nicht identifiziert werden';
+      }
 
       td.appendChild(cb);
       row.insertBefore(td, row.firstChild);
@@ -229,112 +318,31 @@
 
     var origRender = window.renderTable;
     window.renderTable = function () {
-      // Vor Render: Header-CB entfernen (wird nach Render neu eingefügt)
       var oldTh = document.querySelector('#fileTable thead .md-cb-th');
       if (oldTh) oldTh.remove();
-
       origRender.apply(this, arguments);
       setTimeout(patchTable, 30);
     };
   }
 
-  // ══════════════════════════════════════════════════════════
-  //  Download: Datei-Info JETZT auflösen (lazy)
-  // ══════════════════════════════════════════════════════════
-
-  /**
-   * Aus einem prev-btn-Key die fileId + name auflösen.
-   * Mehrere Strategien mit Fallback.
-   */
-  function resolveFileInfo(key) {
-    // Strategie 1: Key ist ein numerischer Index → allFiles[idx]
-    var idx = parseInt(key, 10);
-    if (!isNaN(idx) && window.allFiles) {
-      // Durchsuche allFiles — idx könnte direkt passen
-      // oder wir müssen alle durchprobieren
-      var f = window.allFiles[idx];
-      if (f) {
-        var fid = (typeof window.getFileId === 'function')
-                  ? window.getFileId(f) : (f.versionId || f.id);
-        if (fid) return { fileId: fid, name: f.name || 'unbenannt' };
-      }
-    }
-
-    // Strategie 2: Die zugehörige Tabellenzeile finden und dort
-    // den dl-btn oder den Dateinamen auslesen
-    var prevBtn = document.getElementById('prev-btn-' + key);
-    if (!prevBtn) return null;
-    var row = prevBtn.closest('tr');
-    if (!row) return null;
-
-    // 2a: dl-btn onclick parsen
-    var dlBtn = row.querySelector('.dl-btn');
-    if (dlBtn) {
-      var oc = dlBtn.getAttribute('onclick') || '';
-      // Suche nach einer ID (mind. 10 Zeichen, alphanumerisch + - _)
-      var m = oc.match(/['"]([A-Za-z0-9_-]{8,})['"]/);
-      if (m) {
-        return { fileId: m[1], name: getNameFromRow(row) || 'unbenannt' };
-      }
-    }
-
-    // 2b: Dateinamen aus der Zeile → in allFiles/baseFiles suchen
-    var name = getNameFromRow(row);
-    if (name) {
-      var arrs = [window.allFiles, window.baseFiles];
-      for (var a = 0; a < arrs.length; a++) {
-        if (!arrs[a]) continue;
-        for (var j = 0; j < arrs[a].length; j++) {
-          var ff = arrs[a][j];
-          if (ff && ff.name === name) {
-            var fid2 = (typeof window.getFileId === 'function')
-                       ? window.getFileId(ff) : (ff.versionId || ff.id);
-            if (fid2) return { fileId: fid2, name: name };
-          }
-        }
-      }
-    }
-
-    return null;
-  }
-
-  function getNameFromRow(row) {
-    var tds = row.querySelectorAll('td');
-    for (var i = 0; i < tds.length; i++) {
-      if (tds[i].classList.contains('md-cb-td')) continue;
-      if (tds[i].classList.contains('actions-td')) continue;
-      var el = tds[i].querySelector('.file-name, a, span');
-      var t = el ? el.textContent.trim() : tds[i].textContent.trim();
-      if (t && t.length > 1) return t;
-    }
-    return null;
-  }
-
   // ── ZIP-Download ──────────────────────────────────────────
   function startZipDownload() {
-    // Alle selektierten Keys → fileInfo auflösen
-    var files = [], skipped = [];
+    var files = [];
     for (var key in selectedRows) {
-      if (!selectedRows[key]) continue;
-      var info = resolveFileInfo(key);
-      if (info) {
-        files.push(info);
-      } else {
-        skipped.push(key);
+      if (selectedRows.hasOwnProperty(key) && selectedRows[key]) {
+        files.push(selectedRows[key]);
       }
-    }
-    if (skipped.length > 0) {
-      console.warn('[multi-download] Konnte ' + skipped.length + ' Dateien nicht auflösen:', skipped);
     }
     if (files.length === 0) {
       if (typeof window.setStatus === 'function')
-        window.setStatus('danger', 'Keine Dateien konnten identifiziert werden.');
+        window.setStatus('danger', 'Keine Dateien ausgewählt.');
       return;
     }
 
     isDownloading = true;
     document.getElementById('md-btn-dl').disabled = true;
-    console.log('[multi-download] Start:', files.length, 'Dateien', JSON.stringify(files));
+    console.log('[multi-download] Start:', files.length, 'Dateien',
+      files.map(function(f) { return f.name + ' (' + f.fileId + ')'; }));
     ensureJSZip(function () { downloadFilesAsZip(files); });
   }
 
@@ -435,7 +443,7 @@
         setTimeout(patchTable, 40);
       }).observe(tbody, { childList: true });
     }
-    console.log('[multi-download] Modul v1.3 geladen');
+    console.log('[multi-download] Modul v1.4 geladen');
   }
 
   if (document.readyState === 'loading')
