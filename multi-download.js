@@ -1,12 +1,10 @@
 /* ============================================================
- *  S+L Explorer — Multi-Download (ZIP)  v1.5
+ *  S+L Explorer — Multi-Download (ZIP)  v1.6
  *  <script src="multi-download.js"></script>
  *  Abhängigkeit: JSZip (wird automatisch geladen)
  *
- *  Kernproblem gelöst: allFiles / getFileId leben im Closure
- *  der index.html. downloadFile(idx) ist aber global.
- *  → Wir parsen den idx aus onclick="downloadFile(N)" und
- *    nutzen eine Bridge um allFiles[idx] zu erreichen.
+ *  Bridge v2: Statt allFiles zu cachen wird eine Getter-
+ *  Funktion injiziert die allFiles LIVE liest.
  * ============================================================ */
 (function () {
   'use strict';
@@ -15,70 +13,45 @@
   var TC_BASE   = 'https://app21.connect.trimble.com';
   var JSZIP_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
 
-  var selectedRows  = {};   // { key: { fileId, name } }
+  var selectedRows  = {};
   var dlBarEl       = null;
   var progressEl    = null;
   var isDownloading = false;
 
   // ══════════════════════════════════════════════════════════
-  //  Bridge: allFiles + getFileId aus dem Closure exponieren
-  //  Wir wrappen downloadFile() — die ist global — um bei
-  //  jedem Aufruf die Datei-Daten auf window zu cachen.
+  //  Bridge v2: Live-Getter statt statischer Kopie
+  //  allFiles wird erst nach dem API-Call befüllt, daher
+  //  dürfen wir die Referenz nicht cachen sondern müssen
+  //  bei jedem Aufruf live lesen.
   // ══════════════════════════════════════════════════════════
 
   function installBridge() {
-    if (window._mdBridgeInstalled) return;
-
-    // downloadFile(idx) ist global. Wir wrappen sie.
-    if (typeof window.downloadFile === 'function') {
-      var origDownloadFile = window.downloadFile;
-      window.downloadFile = function (idx) {
-        // Die Bridge: allFiles und getFileId müssen im selben
-        // Scope sein wie downloadFile. Wir testen ob sie
-        // über den Aufruf-Kontext erreichbar sind.
-        // Aber wir können sie nicht direkt greifen — sie sind
-        // im Closure. Stattdessen nutzen wir einen anderen Trick.
-        return origDownloadFile.apply(this, arguments);
-      };
-    }
-
-    // Alternativer Ansatz: Wir injizieren ein Script-Tag
-    // das im selben Scope wie der inline-Code läuft
+    if (window._mdBridgeV2) return;
     var script = document.createElement('script');
-    script.textContent =
-      '(function() {' +
-      '  if (typeof allFiles !== "undefined") {' +
-      '    window._mdAllFiles = allFiles;' +
-      '    console.log("[multi-download] Bridge: allFiles exponiert (" + allFiles.length + " Dateien)");' +
-      '  }' +
-      '  if (typeof getFileId === "function") {' +
-      '    window._mdGetFileId = getFileId;' +
-      '    console.log("[multi-download] Bridge: getFileId exponiert");' +
-      '  }' +
-      '  if (typeof accessToken !== "undefined") {' +
-      '    window._mdAccessToken = accessToken;' +
-      '  }' +
-      '})();';
+    script.textContent = [
+      '(function() {',
+      '  // Live-Getter: liest allFiles zum Aufruf-Zeitpunkt',
+      '  window._mdGetFileInfo = function(idx) {',
+      '    if (typeof allFiles === "undefined" || !allFiles || idx < 0 || idx >= allFiles.length) return null;',
+      '    var f = allFiles[idx];',
+      '    if (!f) return null;',
+      '    var fid = (typeof getFileId === "function") ? getFileId(f) : (f.versionId || f.id);',
+      '    return { fileId: fid, name: f.name || "unbenannt" };',
+      '  };',
+      '  // Live-Getter: aktuelle Anzahl',
+      '  window._mdGetFileCount = function() {',
+      '    return (typeof allFiles !== "undefined" && allFiles) ? allFiles.length : 0;',
+      '  };',
+      '  // Live-Getter: accessToken',
+      '  window._mdGetToken = function() {',
+      '    return (typeof accessToken !== "undefined") ? accessToken : null;',
+      '  };',
+      '  console.log("[multi-download] Bridge v2 installiert (Live-Getter)");',
+      '})();'
+    ].join('\n');
     document.body.appendChild(script);
-    // Script-Tag aufräumen (wurde schon ausgeführt)
     script.remove();
-
-    window._mdBridgeInstalled = true;
-  }
-
-  /**
-   * fileId aus dem Index ermitteln via Bridge
-   */
-  function getFileInfoByIndex(idx) {
-    var files = window._mdAllFiles;
-    var getFid = window._mdGetFileId;
-
-    if (!files || idx < 0 || idx >= files.length) return null;
-    var f = files[idx];
-    if (!f) return null;
-
-    var fileId = (typeof getFid === 'function') ? getFid(f) : (f.versionId || f.id);
-    return { fileId: fileId, name: f.name || 'unbenannt' };
+    window._mdBridgeV2 = true;
   }
 
   // ── JSZip ──────────────────────────────────────────────────
@@ -205,44 +178,32 @@
     return result;
   }
 
-  // ══════════════════════════════════════════════════════════
-  //  Index aus onclick="downloadFile(N)" parsen
-  // ══════════════════════════════════════════════════════════
-
+  // ── Index aus onclick parsen ───────────────────────────────
   function getIndexFromRow(row) {
-    // Primär: dl-btn onclick="downloadFile(N)"
     var dlBtn = row.querySelector('.dl-btn');
     if (dlBtn) {
       var oc = dlBtn.getAttribute('onclick') || '';
       var m = oc.match(/downloadFile\s*\(\s*(\d+)\s*\)/);
       if (m) return parseInt(m[1], 10);
     }
-    // Fallback: prev-btn onclick="openPreview(N)"
     var prevBtn = row.querySelector('.prev-btn, [id^="prev-btn-"]');
     if (prevBtn) {
       var oc2 = prevBtn.getAttribute('onclick') || '';
       var m2 = oc2.match(/openPreview\s*\(\s*(\d+)\s*\)/);
       if (m2) return parseInt(m2[1], 10);
-      // Oder aus der ID
       var idMatch = (prevBtn.id || '').match(/prev-btn-(\d+)/);
       if (idMatch) return parseInt(idMatch[1], 10);
     }
     return -1;
   }
 
-  // ══════════════════════════════════════════════════════════
-  //  Tabelle patchen
-  // ══════════════════════════════════════════════════════════
-
+  // ── Tabelle patchen ────────────────────────────────────────
   function patchTable() {
     var table = document.getElementById('fileTable');
     if (!table) return;
     var thead = table.querySelector('thead tr');
     var tbody = table.querySelector('tbody') || document.getElementById('tableBody');
     if (!thead || !tbody) return;
-
-    // Bridge bei jedem Patch auffrischen (allFiles kann sich ändern)
-    installBridge();
 
     // Sync
     var firstRow = tbody.querySelector('tr');
@@ -262,7 +223,7 @@
         var cbs = document.querySelectorAll('.md-row-cb');
         for (var i = 0; i < cbs.length; i++) {
           var r = cbs[i].closest('tr');
-          if (r && r.style.display !== 'none' && !cbs[i].disabled) {
+          if (r && r.style.display !== 'none') {
             cbs[i].checked = checked;
             toggleRow(cbs[i].getAttribute('data-key'), checked, r);
           }
@@ -288,7 +249,6 @@
       cb.type = 'checkbox';
       cb.className = 'md-row-cb';
       cb.setAttribute('data-key', key);
-      cb.setAttribute('data-idx', idx);
       cb.checked = !!selectedRows[key];
       if (cb.checked) row.classList.add('md-selected');
 
@@ -312,18 +272,17 @@
       var oldTh = document.querySelector('#fileTable thead .md-cb-th');
       if (oldTh) oldTh.remove();
       origRender.apply(this, arguments);
-      setTimeout(function () {
-        // Bridge auffrischen nach Render (allFiles könnte sich geändert haben)
-        installBridge();
-        patchTable();
-      }, 30);
+      setTimeout(patchTable, 30);
     };
   }
 
   // ── ZIP-Download ──────────────────────────────────────────
   function startZipDownload() {
-    // Bridge nochmal auffrischen um aktuelle Daten zu haben
+    // Bridge muss installiert sein
     installBridge();
+
+    var fileCount = (typeof window._mdGetFileCount === 'function') ? window._mdGetFileCount() : 0;
+    console.log('[multi-download] Bridge check: allFiles hat', fileCount, 'Einträge');
 
     var files = [], skipped = [];
     for (var key in selectedRows) {
@@ -331,22 +290,21 @@
       var idx = parseInt(key, 10);
       if (isNaN(idx) || idx < 0) { skipped.push(key); continue; }
 
-      var info = getFileInfoByIndex(idx);
-      if (info) {
+      // Live-Getter aufrufen — liest allFiles zum JETZIGEN Zeitpunkt
+      var info = (typeof window._mdGetFileInfo === 'function') ? window._mdGetFileInfo(idx) : null;
+      if (info && info.fileId) {
         files.push(info);
       } else {
-        skipped.push(key + ' (idx=' + idx + ')');
+        skipped.push(key + ' (idx=' + idx + ', info=' + JSON.stringify(info) + ')');
       }
     }
 
-    if (skipped.length > 0) {
-      console.warn('[multi-download] Nicht aufgelöst:', skipped);
-    }
+    if (skipped.length > 0) console.warn('[multi-download] Nicht aufgelöst:', skipped);
+
     if (files.length === 0) {
-      if (typeof window.setStatus === 'function')
-        window.setStatus('danger', 'Keine Dateien konnten identifiziert werden. Bridge: ' +
-          (window._mdAllFiles ? window._mdAllFiles.length + ' Dateien' : 'NICHT VERFÜGBAR'));
-      finishDownload(false, 'Keine Dateien identifiziert.');
+      var msg = 'Keine Dateien identifiziert. allFiles hat ' + fileCount + ' Einträge.';
+      if (typeof window.setStatus === 'function') window.setStatus('danger', msg);
+      finishDownload(false, msg);
       return;
     }
 
@@ -361,8 +319,8 @@
     var zip = new JSZip(), total = files.length, done = 0, errors = [], usedNames = {};
     showProgress('Starte Downloads …', 0, '0 / ' + total);
 
-    // Token: entweder aus Bridge oder von window
-    var token = window._mdAccessToken || window.accessToken;
+    var token = (typeof window._mdGetToken === 'function' && window._mdGetToken())
+                || window.accessToken;
 
     var chain = Promise.resolve();
     files.forEach(function (entry, i) {
@@ -450,25 +408,19 @@
     injectStyles();
     createDownloadBar();
     createProgress();
+    installBridge();
     hookRenderTable();
 
-    // Bridge installieren — muss nach dem index.html Code laufen,
-    // also mit kurzer Verzögerung
-    setTimeout(function () {
-      installBridge();
-      patchTable();
-    }, 200);
+    // Erstes patchTable mit Verzögerung (Tabelle noch nicht da)
+    setTimeout(patchTable, 500);
 
     var tbody = document.getElementById('tableBody');
     if (tbody) {
       new MutationObserver(function () {
-        setTimeout(function () {
-          installBridge();
-          patchTable();
-        }, 40);
+        setTimeout(patchTable, 40);
       }).observe(tbody, { childList: true });
     }
-    console.log('[multi-download] Modul v1.5 geladen');
+    console.log('[multi-download] Modul v1.6 geladen');
   }
 
   if (document.readyState === 'loading')
