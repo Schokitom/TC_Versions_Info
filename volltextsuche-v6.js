@@ -650,8 +650,72 @@
     setTimeout(updateVisibleCount, 500);
   }
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function() { init(); setupCountObserver(); });
-  else setTimeout(function() { init(); setupCountObserver(); }, 500);
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function() { init(); setupCountObserver(); setupTreeHighlight(); });
+  else setTimeout(function() { init(); setupCountObserver(); setupTreeHighlight(); }, 500);
+
+  // ═══════════════════════════════════════════════════════════════
+  //  BAUM-HIGHLIGHTING: Eltern-Ordner markieren wenn Kinder
+  //  angehakt sind (indeterminate-Style)
+  // ═══════════════════════════════════════════════════════════════
+  function updateTreeParentHighlight() {
+    var treeBody = document.getElementById('treeBody');
+    if (!treeBody) return;
+
+    // Erst alle indeterminate entfernen
+    var allRows = treeBody.querySelectorAll('.tree-row');
+    for (var i = 0; i < allRows.length; i++) {
+      allRows[i].classList.remove('has-checked-child');
+    }
+
+    // Alle checked Nodes finden
+    var checkedRows = treeBody.querySelectorAll('.tree-row.checked');
+    checkedRows.forEach(function(checkedRow) {
+      // Nach oben traversieren: .tree-node → parent .tree-children → parent .tree-node → .tree-row
+      var node = checkedRow.closest('.tree-node');
+      if (!node) return;
+      var parent = node.parentElement;
+      while (parent) {
+        if (parent.classList && parent.classList.contains('tree-children')) {
+          var parentNode = parent.closest('.tree-node');
+          if (parentNode) {
+            var parentRow = parentNode.querySelector(':scope > .tree-row');
+            if (parentRow && !parentRow.classList.contains('checked')) {
+              parentRow.classList.add('has-checked-child');
+            }
+          }
+        }
+        // Weiter nach oben
+        parent = parent.parentElement;
+        if (parent && parent.id === 'treeBody') break;
+      }
+    });
+  }
+
+  function setupTreeHighlight() {
+    var treeBody = document.getElementById('treeBody');
+    if (!treeBody) return;
+
+    // CSS für has-checked-child injizieren
+    var style = document.createElement('style');
+    style.textContent =
+      '.tree-row.has-checked-child .tree-checkbox { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }' +
+      '.tree-row.has-checked-child .tree-label { color: var(--accent); opacity: 0.7; }';
+    document.head.appendChild(style);
+
+    // MutationObserver auf den Baum — reagiert auf class-Änderungen (checked/unchecked)
+    var observer = new MutationObserver(function() {
+      setTimeout(updateTreeParentHighlight, 50);
+    });
+    observer.observe(treeBody, {
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['class'],
+      childList: true,
+    });
+
+    // Initial ausführen
+    setTimeout(updateTreeParentHighlight, 1000);
+  }
 
   console.log('[FTS] Volltextsuche v10 geladen (DOM-basierte Sichtbarkeit)');
 })();
