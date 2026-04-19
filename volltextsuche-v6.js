@@ -515,15 +515,25 @@
     }
   }
 
+  var _searchAllDebounce = null;
+
   function _doFilter() {
     var inp = document.getElementById('searchInput');
     var query = inp ? inp.value.trim() : '';
     var scopeCheck = document.getElementById('searchScopeCheck');
     var searchAll = scopeCheck && scopeCheck.checked;
 
-    if (searchAll && query) {
-      if (typeof searchEntireProject === 'function') searchEntireProject(query);
+    if (searchAll && query.length >= 2) {
+      // Debounce: Warte 400ms nach letztem Tastendruck bevor gesucht wird
+      if (_searchAllDebounce) clearTimeout(_searchAllDebounce);
+      _searchAllDebounce = setTimeout(function() {
+        if (typeof searchEntireProject === 'function') {
+          searchEntireProject(query.toLowerCase());
+        }
+      }, 400);
+      return;
     } else {
+      if (_searchAllDebounce) { clearTimeout(_searchAllDebounce); _searchAllDebounce = null; }
       searchResultFiles = null;
       allFiles = baseFiles.slice();
       if (typeof searchAllAbortController !== 'undefined' && searchAllAbortController) {
