@@ -1,17 +1,6 @@
 // ═══════════════════════════════════════════════════════════════
-//  S+L Explorer — Volltextsuche v8
-//  Neue UX: Button + separate Suchleiste + persistenter Cache
-// ═══════════════════════════════════════════════════════════════
-//
-//  Ablauf:
-//  1. User lädt Ordner → Dateien erscheinen in der Tabelle
-//  2. Dateinamen-Filter über bestehende Suchleiste (unverändert)
-//  3. User klickt "Volltextsuche" → Indexierung startet sofort
-//  4. Nach Abschluss: Zweite Suchleiste erscheint
-//  5. Suche in dieser Leiste durchsucht PDF-Inhalte
-//  6. Bei Ordnerwechsel: Suchleiste verschwindet, Cache bleibt
-//  7. Beim Zurückkehren: Cache wird erkannt, Suchleiste sofort da
-//
+//  S+L Explorer — Volltextsuche v9
+//  Indexiert nur aktuell gefilterte Dateien (Filter bauen aufeinander auf)
 // ═══════════════════════════════════════════════════════════════
 (function() {
 
@@ -26,13 +15,13 @@
   var FONT_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/standard_fonts/';
 
   var _pdfjsLib = null;
-  var _ftsCache = {};          // { fileId: { text, pages, src } } — bleibt persistent
+  var _ftsCache = {};          // Persistenter Cache: { fileId: { text, pages, src } }
   var _indexing = false;
   var _abort = null;
   var _progress = { done: 0, total: 0, cached: 0, extracted: 0, errors: 0 };
   var _libId = null;
   var _defReady = false;
-  var _lastIndexedFileIds = null; // Set von File-IDs die zuletzt indexiert wurden
+  var _indexedFileIds = {};    // IDs der Dateien die beim letzten Indexlauf indexiert wurden
   var _ftsSearchVisible = false;
 
   // ─── PDF.js ───
@@ -80,7 +69,6 @@
         }}
       }).then(function(r2) {
         if (r2.ok || r2.status === 201) { _defReady = true; return true; }
-        console.error('[FTS] Def-Fehler:', r2.status, r2.data);
         return false;
       });
     });
@@ -133,6 +121,26 @@
     });
   }
 
+  // ═══════════════════════════════════════════════════════════════
+  //  AKTUELL SICHTBARE PDFs ermitteln
+  //  Basiert auf allFiles (bereits durch Dateinamen-Filter,
+  //  Dateiart-Filter und Ordner-Auswahl gefiltert)
+  // ═══════════════════════════════════════════════════════════════
+  function getVisiblePdfFiles() {
+    return allFiles.filter(function(f) {
+      return f.name && f.name.toLowerCase().endsWith('.pdf');
+    });
+  }
+
+  function getVisiblePdfFileIds() {
+    var ids = {};
+    getVisiblePdfFiles().forEach(function(f) {
+      var id = getFileId(f);
+      if (id) ids[id] = true;
+    });
+    return ids;
+  }
+
   // ─── Indexierung ───
   function indexOne(file) {
     var fileId = getFileId(file);
@@ -151,7 +159,6 @@
         _progress.cached++;
         return;
       }
-      // Extrahieren
       return extractText(fileId).then(function(result) {
         _ftsCache[fileId] = { text: result.text, pages: result.pages, src: 'extracted' };
         _progress.extracted++;
@@ -171,17 +178,31 @@
   function startIndexing() {
     if (_indexing) return;
 
-    // Prüfen ob aktuelle Dateien schon komplett im Cache sind
-    var currentFileIds = getCurrentPdfFileIds();
-    if (_lastIndexedFileIds && setsEqual(currentFileIds, _lastIndexedFileIds)) {
-      // Gleiche Dateien wie vorher → Suchleiste sofort zeigen
+    // Aktuell sichtbare PDFs ermitteln
+    var pdfFiles = getVisiblePdfFiles();
+
+    if (pdfFiles.length === 0) {
+      updateFtsButton('error', 'Keine PDFs in der aktuellen Ansicht');
+      return;
+    }
+
+    // Prüfen ob alle sichtbaren PDFs bereits im Cache sind
+    var allCached = pdfFiles.every(function(f) {
+      var id = getFileId(f);
+      return id && _ftsCache[id] && _ftsCache[id].text;
+    });
+
+    if (allCached) {
+      // Alles schon gecacht → sofort Suchleiste zeigen
+      _indexedFileIds = getVisiblePdfFileIds();
+      updateFtsButton('ready', pdfFiles.length + ' PDFs aus Cache');
       showFtsSearch();
       return;
     }
 
     _indexing = true;
     _abort = { stopped: false };
-    updateFtsButton('indexing', 'Indexiere...');
+    updateFtsButton('indexing', '0/' + pdfFiles.length);
 
     loadPdfJs().then(function(lib) {
       if (!lib) { _indexing = false; updateFtsButton('error', 'PDF.js Fehler'); return; }
@@ -189,12 +210,7 @@
     }).then(function(ok) {
       if (!ok) { _indexing = false; updateFtsButton('error', 'Cache-Fehler'); return; }
 
-      var pdfFiles = baseFiles.filter(function(f) {
-        return f.name && f.name.toLowerCase().endsWith('.pdf');
-      });
-
       _progress = { done: 0, total: pdfFiles.length, cached: 0, extracted: 0, errors: 0 };
-      updateFtsButton('indexing', '0/' + pdfFiles.length);
 
       var i = 0;
       var BATCH = 3;
@@ -202,8 +218,8 @@
       function nextBatch() {
         if (_abort.stopped || i >= pdfFiles.length) {
           _indexing = false;
-          _lastIndexedFileIds = getCurrentPdfFileIds();
-          var msg = _progress.extracted + ' neu, ' + _progress.cached + ' Cache';
+          _indexedFileIds = getVisiblePdfFileIds();
+          var msg = _progress.extracted + ' neu, ' + _progress.cached + ' Cache (' + pdfFiles.length + ' PDFs)';
           updateFtsButton('ready', msg);
           showFtsSearch();
           console.log('[FTS] Fertig:', _progress);
@@ -222,35 +238,18 @@
     });
   }
 
-  function getCurrentPdfFileIds() {
-    var ids = {};
-    baseFiles.forEach(function(f) {
-      if (f.name && f.name.toLowerCase().endsWith('.pdf')) {
-        var id = getFileId(f);
-        if (id) ids[id] = true;
-      }
-    });
-    return ids;
-  }
-
-  function setsEqual(a, b) {
-    var ka = Object.keys(a), kb = Object.keys(b);
-    if (ka.length !== kb.length) return false;
-    for (var i = 0; i < ka.length; i++) { if (!b[ka[i]]) return false; }
-    return true;
-  }
-
-  // ─── Suche ───
+  // ─── Suche — nur in den indexierten (= gefilterten) Dateien ───
   function ftsSearch(query) {
     if (!query || query.length < 2) return [];
     var terms = query.toLowerCase().split(/\s+/).filter(function(t) { return t.length >= 2; });
     var results = [];
 
-    for (var fi = 0; fi < baseFiles.length; fi++) {
-      var file = baseFiles[fi];
+    // Nur in den Dateien suchen die beim letzten Indexlauf dabei waren
+    for (var fi = 0; fi < allFiles.length; fi++) {
+      var file = allFiles[fi];
       var fileId = getFileId(file);
       if (!fileId) continue;
-      if (typeof fileMatchesActiveTypes === 'function' && !fileMatchesActiveTypes(file)) continue;
+      if (!_indexedFileIds[fileId]) continue; // Nicht indexiert → überspringen
 
       var entry = _ftsCache[fileId];
       if (!entry || !entry.text) continue;
@@ -265,7 +264,6 @@
         if (content.indexOf(term) >= 0) {
           var occ = content.split(term).length - 1;
           score += 5 * Math.min(occ, 10);
-          // Snippet
           var ci = content.indexOf(term);
           var s0 = Math.max(0, ci - 50);
           var s1 = Math.min(content.length, ci + term.length + 50);
@@ -273,7 +271,6 @@
             snippets.push((s0 > 0 ? '...' : '') + content.substring(s0, s1) + (s1 < content.length ? '...' : ''));
           }
         }
-        // Bonus wenn auch im Namen
         if (name.indexOf(term) >= 0) score += 3;
       }
 
@@ -321,9 +318,7 @@
       if (idx < 0) { allFiles.push(f); idx = allFiles.length - 1; }
 
       var badges = '<span style="display:inline-block;font-size:9px;padding:1px 5px;border-radius:8px;background:#22d3a0;color:#000;font-weight:600;margin-left:4px">Inhalt</span>';
-      if (r.pages > 0) {
-        badges += '<span style="display:inline-block;font-size:9px;padding:1px 5px;border-radius:8px;background:#1a1d27;color:#7a8199;margin-left:4px">' + r.pages + 'p</span>';
-      }
+      if (r.pages > 0) badges += '<span style="display:inline-block;font-size:9px;padding:1px 5px;border-radius:8px;background:#1a1d27;color:#7a8199;margin-left:4px">' + r.pages + 'p</span>';
 
       var snippetHtml = '';
       if (r.snippets.length > 0) {
@@ -362,47 +357,42 @@
   // ═══════════════════════════════════════════════════════════════
   function injectFtsUI() {
     if (document.getElementById('sl-fts-wrap')) return;
-
     var toolbar = document.getElementById('toolbar');
     if (!toolbar) return;
 
-    // CSS
     var css = document.createElement('style');
     css.textContent =
       '#sl-fts-wrap{display:flex;align-items:center;gap:6px;flex-shrink:0}' +
       '#sl-fts-btn{display:flex;align-items:center;gap:6px;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:6px 12px;font-size:12px;font-family:var(--font-ui);color:var(--text);cursor:pointer;transition:all .15s;white-space:nowrap}' +
       '#sl-fts-btn:hover{border-color:var(--accent);color:var(--accent)}' +
-      '#sl-fts-btn.indexing{border-color:#f59e0b;color:#f59e0b}' +
+      '#sl-fts-btn.indexing{border-color:#f59e0b;color:#f59e0b;cursor:wait}' +
       '#sl-fts-btn.ready{border-color:#22d3a0;color:#22d3a0}' +
       '#sl-fts-btn.error{border-color:#ef4444;color:#ef4444}' +
       '#sl-fts-btn svg{width:14px;height:14px;fill:currentColor}' +
       '#sl-fts-status{font-family:var(--font);font-size:10px;color:#7a8199;white-space:nowrap}' +
-      '#sl-fts-search-wrap{display:none;position:relative;flex-shrink:1;min-width:120px;max-width:250px}' +
+      '#sl-fts-search-wrap{display:none;position:relative;flex-shrink:1;min-width:140px;max-width:280px}' +
       '#sl-fts-search-wrap.visible{display:block}' +
       '#sl-fts-search{width:100%;background:var(--bg);border:1px solid #22d3a0;border-radius:6px;padding:6px 10px 6px 28px;font-size:12px;color:var(--text);font-family:var(--font-ui);outline:none;transition:border-color .2s}' +
       '#sl-fts-search:focus{border-color:#00c2ff}' +
       '#sl-fts-search::placeholder{color:#7a8199}' +
-      '#sl-fts-search-wrap svg{position:absolute;left:8px;top:50%;transform:translateY(-50%);width:13px;height:13px;fill:#22d3a0}';
+      '#sl-fts-search-wrap svg{position:absolute;left:8px;top:50%;transform:translateY(-50%);width:13px;height:13px;fill:#22d3a0}' +
+      '@keyframes sl-spin{to{transform:rotate(360deg)}}';
     document.head.appendChild(css);
 
-    // Container
     var wrap = document.createElement('div');
     wrap.id = 'sl-fts-wrap';
 
-    // Button
     var btn = document.createElement('button');
     btn.id = 'sl-fts-btn';
-    btn.title = 'PDF-Inhalte indexieren f\u00fcr Volltextsuche';
+    btn.title = 'Aktuell angezeigte PDFs f\u00fcr Volltextsuche indexieren';
     btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>Volltextsuche';
     btn.onclick = function() { startIndexing(); };
     wrap.appendChild(btn);
 
-    // Status
     var status = document.createElement('span');
     status.id = 'sl-fts-status';
     wrap.appendChild(status);
 
-    // Suchleiste (initially hidden)
     var searchWrap = document.createElement('div');
     searchWrap.id = 'sl-fts-search-wrap';
     searchWrap.innerHTML = '<svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>';
@@ -416,28 +406,22 @@
         var results = ftsSearch(query);
         console.log('[FTS] Suche "' + query + '": ' + results.length + ' Treffer');
         renderFtsResults(results, query);
-      } else if (query.length === 0) {
-        // Zurück zur normalen Tabelle
+      } else if (query.length < 2) {
         restoreNormalTable();
       }
     });
     searchWrap.appendChild(searchInput);
     wrap.appendChild(searchWrap);
 
-    // Einfügen: vor dem stat-pill oder am Ende der Toolbar
     var statPill = toolbar.querySelector('.stat-pill');
-    if (statPill) {
-      toolbar.insertBefore(wrap, statPill);
-    } else {
-      toolbar.appendChild(wrap);
-    }
+    if (statPill) toolbar.insertBefore(wrap, statPill);
+    else toolbar.appendChild(wrap);
   }
 
   function updateFtsButton(state, msg) {
     var btn = document.getElementById('sl-fts-btn');
     var status = document.getElementById('sl-fts-status');
     if (!btn) return;
-
     btn.className = '';
     if (state === 'indexing') {
       btn.className = 'indexing';
@@ -451,43 +435,32 @@
     } else {
       btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>Volltextsuche';
     }
-
     if (status) status.textContent = msg || '';
   }
 
   function showFtsSearch() {
     var wrap = document.getElementById('sl-fts-search-wrap');
-    if (wrap) {
-      wrap.classList.add('visible');
-      _ftsSearchVisible = true;
-    }
+    if (wrap) { wrap.classList.add('visible'); _ftsSearchVisible = true; }
   }
 
   function hideFtsSearch() {
     var wrap = document.getElementById('sl-fts-search-wrap');
-    if (wrap) {
-      wrap.classList.remove('visible');
-      _ftsSearchVisible = false;
-      // Suchfeld leeren
-      var input = document.getElementById('sl-fts-search');
-      if (input) input.value = '';
-    }
+    if (wrap) { wrap.classList.remove('visible'); _ftsSearchVisible = false; }
+    var input = document.getElementById('sl-fts-search');
+    if (input) input.value = '';
   }
 
   function restoreNormalTable() {
     searchResultFiles = null;
     allFiles = baseFiles.slice();
     if (typeof searchAllAbortController !== 'undefined' && searchAllAbortController) {
-      searchAllAbortController.abort();
-      searchAllAbortController = null;
+      searchAllAbortController.abort(); searchAllAbortController = null;
     }
     renderTable();
   }
 
   // ═══════════════════════════════════════════════════════════════
   //  DATEIÄNDERUNGS-ERKENNUNG
-  //  Wenn sich die Dateibasis ändert (Ordnerwechsel, Filter),
-  //  wird die FTS-Suchleiste ausgeblendet
   // ═══════════════════════════════════════════════════════════════
   var _lastBaseFilesSignature = null;
 
@@ -498,32 +471,24 @@
   function checkForFileChanges() {
     var sig = getBaseFilesSignature();
     if (_lastBaseFilesSignature !== null && sig !== _lastBaseFilesSignature) {
-      // Dateien haben sich geändert
+      // Dateien haben sich geändert → Suchleiste ausblenden, Button zurücksetzen
       hideFtsSearch();
-      // Button zurücksetzen
+      _indexedFileIds = {};
       updateFtsButton('default', '');
-      // Prüfen ob aktuelle Dateien im Cache sind
-      var currentIds = getCurrentPdfFileIds();
-      if (_lastIndexedFileIds && setsEqual(currentIds, _lastIndexedFileIds)) {
-        // Gleiche Dateien → sofort bereit
-        updateFtsButton('ready', 'Cache verf\u00fcgbar');
-      }
     }
     _lastBaseFilesSignature = sig;
   }
 
-  // Alle 500ms prüfen ob sich die Dateien geändert haben
   setInterval(checkForFileChanges, 500);
 
   // ═══════════════════════════════════════════════════════════════
-  //  INIT
+  //  INIT + filterTable Hook
   // ═══════════════════════════════════════════════════════════════
   function init() {
     var toolbar = document.getElementById('toolbar');
     if (!toolbar) return;
     injectFtsUI();
 
-    // Bestehende Suchleiste: oninput ersetzen (wie in v5)
     var searchInput = document.getElementById('searchInput');
     if (searchInput) {
       searchInput.removeAttribute('oninput');
@@ -531,9 +496,9 @@
         // Bei Eingabe in der Dateinamen-Suche: FTS-Suchleiste ausblenden
         if (_ftsSearchVisible) {
           hideFtsSearch();
+          _indexedFileIds = {};
           updateFtsButton('default', '');
         }
-        // Normale Filterung
         _doFilter();
       });
     }
@@ -541,9 +506,7 @@
     var scopeCheck = document.getElementById('searchScopeCheck');
     if (scopeCheck) {
       scopeCheck.removeAttribute('onchange');
-      scopeCheck.addEventListener('change', function() {
-        _doFilter();
-      });
+      scopeCheck.addEventListener('change', function() { _doFilter(); });
     }
   }
 
@@ -559,17 +522,13 @@
       searchResultFiles = null;
       allFiles = baseFiles.slice();
       if (typeof searchAllAbortController !== 'undefined' && searchAllAbortController) {
-        searchAllAbortController.abort();
-        searchAllAbortController = null;
+        searchAllAbortController.abort(); searchAllAbortController = null;
       }
       renderTable();
     }
   }
 
-  // filterTable überschreiben
   window.filterTable = _doFilter;
-
-  // Globale Referenzen
   window.fulltextSearch = ftsSearch;
   window.renderFtsResults = renderFtsResults;
   window.ftsCache = _ftsCache;
@@ -577,5 +536,5 @@
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else setTimeout(init, 500);
 
-  console.log('[FTS] Volltextsuche v8 geladen (Button + separate Suchleiste)');
+  console.log('[FTS] Volltextsuche v9 geladen (Filter bauen aufeinander auf)');
 })();
