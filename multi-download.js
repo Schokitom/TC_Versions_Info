@@ -1,11 +1,7 @@
 /* ============================================================
- *  S+L Explorer — Multi-Download (ZIP)  v1.2
- *  Separates Modul: <script src="multi-download.js"></script>
+ *  S+L Explorer — Multi-Download (ZIP)  v1.3
+ *  <script src="multi-download.js"></script>
  *  Abhängigkeit: JSZip (wird automatisch geladen)
- *
- *  Fix v1.2: Spaltenversatz behoben — thead und tbody werden
- *  immer synchron gepatcht. renderTable() überschreibt tbody
- *  komplett, daher wird bei jedem Render alles neu injiziert.
  * ============================================================ */
 (function () {
   'use strict';
@@ -14,7 +10,8 @@
   var TC_BASE   = 'https://app21.connect.trimble.com';
   var JSZIP_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
 
-  var selectedFiles = {};   // { fileId: { fileId, name } }
+  // State: selectedRows = { "prev-btn-idx": true }
+  var selectedRows  = {};
   var dlBarEl       = null;
   var progressEl    = null;
   var isDownloading = false;
@@ -35,64 +32,21 @@
     var style = document.createElement('style');
     style.id = 'md-styles';
     style.textContent =
-      '.md-cb-th, .md-cb-td {' +
-      '  width: 36px !important; min-width: 36px !important; max-width: 36px !important;' +
-      '  text-align: center !important; vertical-align: middle !important;' +
-      '  padding: 4px 6px !important; box-sizing: border-box !important;' +
-      '}' +
-      '.md-cb-th input, .md-cb-td input {' +
-      '  width: 16px; height: 16px; cursor: pointer;' +
-      '  accent-color: var(--accent, #00c2ff);' +
-      '}' +
-      '#md-download-bar {' +
-      '  position: fixed; bottom: 60px; left: 50%;' +
-      '  transform: translateX(-50%);' +
-      '  background: var(--surface, #1a1d27);' +
-      '  border: 1px solid var(--accent, #00c2ff);' +
-      '  border-radius: 12px; padding: 10px 20px;' +
-      '  display: none; align-items: center; gap: 14px;' +
-      '  z-index: 9000;' +
-      '  box-shadow: 0 4px 24px rgba(0,194,255,.25);' +
-      '  font-family: var(--font-ui, "DM Sans", sans-serif);' +
-      '  color: var(--text, #e4e8f0);' +
-      '  animation: md-slide-up .25s ease-out;' +
-      '}' +
-      '@keyframes md-slide-up {' +
-      '  from { opacity:0; transform: translateX(-50%) translateY(20px); }' +
-      '  to   { opacity:1; transform: translateX(-50%) translateY(0); }' +
-      '}' +
-      '#md-download-bar .md-count { font-weight:600; font-size:14px; white-space:nowrap; }' +
-      '#md-download-bar .md-btn {' +
-      '  background: var(--accent, #00c2ff); color: #000; border: none;' +
-      '  border-radius: 8px; padding: 8px 18px; font-weight: 700; font-size: 13px;' +
-      '  cursor: pointer; display: flex; align-items: center; gap: 6px;' +
-      '  font-family: var(--font-ui, "DM Sans", sans-serif);' +
-      '  transition: background .15s, transform .1s;' +
-      '}' +
-      '#md-download-bar .md-btn:hover { background:#33d1ff; transform:scale(1.03); }' +
-      '#md-download-bar .md-btn:active { transform:scale(.97); }' +
-      '#md-download-bar .md-btn:disabled { opacity:.5; cursor:not-allowed; transform:none; }' +
-      '#md-download-bar .md-btn-cancel {' +
-      '  background:transparent; color:var(--muted,#7a8199);' +
-      '  border:1px solid var(--border,#2a2d3e); border-radius:8px;' +
-      '  padding:8px 14px; font-size:13px; cursor:pointer;' +
-      '  font-family: var(--font-ui, "DM Sans", sans-serif);' +
-      '}' +
-      '#md-download-bar .md-btn-cancel:hover { color:var(--text,#e4e8f0); border-color:var(--muted); }' +
-      '#md-progress {' +
-      '  position:fixed; bottom:120px; left:50%; transform:translateX(-50%);' +
-      '  background:var(--surface,#1a1d27); border:1px solid var(--border,#2a2d3e);' +
-      '  border-radius:12px; padding:16px 24px;' +
-      '  display:none; flex-direction:column; gap:8px;' +
-      '  z-index:9001; min-width:320px;' +
-      '  box-shadow:0 4px 24px rgba(0,0,0,.4);' +
-      '  font-family:var(--font-ui,"DM Sans",sans-serif); color:var(--text,#e4e8f0);' +
-      '}' +
-      '#md-progress .md-prog-label { font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }' +
-      '#md-progress .md-prog-track { height:6px; background:var(--border,#2a2d3e); border-radius:3px; overflow:hidden; }' +
-      '#md-progress .md-prog-fill  { height:100%; background:var(--accent,#00c2ff); border-radius:3px; width:0%; transition:width .3s ease; }' +
-      '#md-progress .md-prog-detail { font-size:11px; color:var(--muted,#7a8199); }' +
-      '#fileTable tbody tr.md-selected { background:rgba(0,194,255,.06) !important; }';
+      '.md-cb-th,.md-cb-td{width:36px!important;min-width:36px!important;max-width:36px!important;text-align:center!important;vertical-align:middle!important;padding:4px 6px!important;box-sizing:border-box!important}' +
+      '.md-cb-th input,.md-cb-td input{width:16px;height:16px;cursor:pointer;accent-color:var(--accent,#00c2ff)}' +
+      '#md-download-bar{position:fixed;bottom:60px;left:50%;transform:translateX(-50%);background:var(--surface,#1a1d27);border:1px solid var(--accent,#00c2ff);border-radius:12px;padding:10px 20px;display:none;align-items:center;gap:14px;z-index:9000;box-shadow:0 4px 24px rgba(0,194,255,.25);font-family:var(--font-ui,"DM Sans",sans-serif);color:var(--text,#e4e8f0);animation:md-slide-up .25s ease-out}' +
+      '@keyframes md-slide-up{from{opacity:0;transform:translateX(-50%) translateY(20px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}' +
+      '#md-download-bar .md-count{font-weight:600;font-size:14px;white-space:nowrap}' +
+      '#md-download-bar .md-btn{background:var(--accent,#00c2ff);color:#000;border:none;border-radius:8px;padding:8px 18px;font-weight:700;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:6px;font-family:var(--font-ui,"DM Sans",sans-serif);transition:background .15s,transform .1s}' +
+      '#md-download-bar .md-btn:hover{background:#33d1ff;transform:scale(1.03)}#md-download-bar .md-btn:active{transform:scale(.97)}#md-download-bar .md-btn:disabled{opacity:.5;cursor:not-allowed;transform:none}' +
+      '#md-download-bar .md-btn-cancel{background:transparent;color:var(--muted,#7a8199);border:1px solid var(--border,#2a2d3e);border-radius:8px;padding:8px 14px;font-size:13px;cursor:pointer;font-family:var(--font-ui,"DM Sans",sans-serif)}' +
+      '#md-download-bar .md-btn-cancel:hover{color:var(--text,#e4e8f0);border-color:var(--muted)}' +
+      '#md-progress{position:fixed;bottom:120px;left:50%;transform:translateX(-50%);background:var(--surface,#1a1d27);border:1px solid var(--border,#2a2d3e);border-radius:12px;padding:16px 24px;display:none;flex-direction:column;gap:8px;z-index:9001;min-width:320px;box-shadow:0 4px 24px rgba(0,0,0,.4);font-family:var(--font-ui,"DM Sans",sans-serif);color:var(--text,#e4e8f0)}' +
+      '#md-progress .md-prog-label{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+      '#md-progress .md-prog-track{height:6px;background:var(--border,#2a2d3e);border-radius:3px;overflow:hidden}' +
+      '#md-progress .md-prog-fill{height:100%;background:var(--accent,#00c2ff);border-radius:3px;width:0%;transition:width .3s ease}' +
+      '#md-progress .md-prog-detail{font-size:11px;color:var(--muted,#7a8199)}' +
+      '#fileTable tbody tr.md-selected{background:rgba(0,194,255,.06)!important}';
     document.head.appendChild(style);
   }
 
@@ -137,8 +91,11 @@
   }
   function hideProgress() { if (progressEl) progressEl.style.display = 'none'; }
 
-  // ── Auswahl-State ─────────────────────────────────────────
-  function getSelectedCount() { return Object.keys(selectedFiles).length; }
+  // ── Auswahl ────────────────────────────────────────────────
+  function getSelectedCount() {
+    var n = 0; for (var k in selectedRows) if (selectedRows[k]) n++;
+    return n;
+  }
 
   function updateBar() {
     var count = getSelectedCount();
@@ -149,23 +106,23 @@
     } else if (!isDownloading) {
       dlBarEl.style.display = 'none';
     }
-    var headerCb = document.getElementById('md-cb-all');
-    if (headerCb) {
-      var vis = getVisibleCheckboxes().length;
-      headerCb.checked       = vis > 0 && count >= vis;
-      headerCb.indeterminate = count > 0 && count < vis;
+    var hcb = document.getElementById('md-cb-all');
+    if (hcb) {
+      var vis = getVisibleRowKeys().length;
+      hcb.checked       = vis > 0 && count >= vis;
+      hcb.indeterminate = count > 0 && count < vis;
     }
   }
 
-  function toggleSelect(fileInfo, checked, row) {
-    if (checked) selectedFiles[fileInfo.fileId] = fileInfo;
-    else delete selectedFiles[fileInfo.fileId];
+  function toggleRow(key, checked, row) {
+    if (checked) selectedRows[key] = true;
+    else delete selectedRows[key];
     if (row) row.classList.toggle('md-selected', !!checked);
     updateBar();
   }
 
   function deselectAll() {
-    selectedFiles = {};
+    selectedRows = {};
     var cbs = document.querySelectorAll('.md-row-cb');
     for (var i = 0; i < cbs.length; i++) cbs[i].checked = false;
     var rows = document.querySelectorAll('#fileTable tbody tr');
@@ -173,131 +130,76 @@
     updateBar();
   }
 
-  function getVisibleCheckboxes() {
+  /** Gibt die Keys aller sichtbaren Zeilen zurück */
+  function getVisibleRowKeys() {
     var result = [];
     var cbs = document.querySelectorAll('.md-row-cb');
     for (var i = 0; i < cbs.length; i++) {
       var row = cbs[i].closest('tr');
-      if (row && row.style.display !== 'none') result.push(cbs[i]);
+      if (row && row.style.display !== 'none') {
+        var key = cbs[i].getAttribute('data-key');
+        if (key) result.push(key);
+      }
     }
     return result;
   }
 
-  // ── Datei-Info aus Zeile extrahieren ───────────────────────
-  function extractFileInfoFromRow(row) {
-    var prevBtn = row.querySelector('[id^="prev-btn-"]');
-    if (prevBtn) {
-      var idx = parseInt(prevBtn.id.replace('prev-btn-', ''), 10);
-      if (!isNaN(idx) && window.allFiles && idx >= 0 && idx < window.allFiles.length) {
-        var f = window.allFiles[idx];
-        if (f) {
-          var fileId = (typeof window.getFileId === 'function')
-                       ? window.getFileId(f) : (f.versionId || f.id);
-          if (fileId) return { fileId: fileId, name: f.name || 'unbenannt' };
-        }
-      }
-    }
-    // Fallback: dl-btn onclick parsen
-    var dlBtn = row.querySelector('.dl-btn');
-    if (dlBtn) {
-      var oc = dlBtn.getAttribute('onclick') || '';
-      var m = oc.match(/['"]([A-Za-z0-9_-]{10,})['"]/);
-      if (m) return { fileId: m[1], name: getNameFromRow(row) || 'unbenannt' };
-    }
-    // Fallback: Name → allFiles/baseFiles suchen
-    var name = getNameFromRow(row);
-    if (name) {
-      var arrs = [window.allFiles, window.baseFiles];
-      for (var a = 0; a < arrs.length; a++) {
-        if (!arrs[a]) continue;
-        for (var i = 0; i < arrs[a].length; i++) {
-          var ff = arrs[a][i];
-          if (ff && ff.name === name) {
-            var fid = (typeof window.getFileId === 'function')
-                      ? window.getFileId(ff) : (ff.versionId || ff.id);
-            if (fid) return { fileId: fid, name: name };
-          }
-        }
-      }
-    }
-    return null;
-  }
-
-  function getNameFromRow(row) {
-    var tds = row.querySelectorAll('td');
-    for (var i = 0; i < tds.length; i++) {
-      if (tds[i].classList.contains('md-cb-td')) continue;
-      var el = tds[i].querySelector('.file-name, a, span');
-      var t = el ? el.textContent.trim() : tds[i].textContent.trim();
-      if (t && t.length > 1) return t;
-    }
-    return null;
-  }
-
   // ══════════════════════════════════════════════════════════
-  //  KERN-FIX: Checkbox-Injection — thead + tbody synchron
+  //  Tabelle patchen: Checkboxen IMMER einfügen
+  //  Key = prev-btn-Index (wie v1.0), Datei-Info wird erst
+  //  beim Download aufgelöst.
   // ══════════════════════════════════════════════════════════
 
   function patchTable() {
     var table = document.getElementById('fileTable');
     if (!table) return;
-
     var thead = table.querySelector('thead tr');
-    var tbody = table.querySelector('tbody') || table.querySelector('#tableBody');
+    var tbody = table.querySelector('tbody') || document.getElementById('tableBody');
     if (!thead || !tbody) return;
 
-    // ── Schritt 1: Prüfen ob tbody-Zeilen Checkboxen haben ──
-    var firstDataRow = tbody.querySelector('tr');
-    var tbodyHasCb   = firstDataRow && firstDataRow.querySelector('.md-cb-td');
-    var theadHasCb   = thead.querySelector('.md-cb-th');
-
-    // Wenn tbody keine Checkboxen hat (renderTable hat sie weggewischt),
-    // dann auch die thead-Checkbox entfernen um Sync herzustellen
-    if (theadHasCb && !tbodyHasCb && firstDataRow) {
+    // Sync-Check: wenn tbody keine Checkboxen hat, thead-CB entfernen
+    var firstRow   = tbody.querySelector('tr');
+    var tbodyHasCb = firstRow && firstRow.querySelector('.md-cb-td');
+    var theadHasCb = thead.querySelector('.md-cb-th');
+    if (theadHasCb && !tbodyHasCb && firstRow) {
       theadHasCb.remove();
       theadHasCb = null;
     }
 
-    // ── Schritt 2: Header-Checkbox einfügen wenn nötig ──────
+    // Header-Checkbox
     if (!thead.querySelector('.md-cb-th')) {
       var th = document.createElement('th');
       th.className = 'md-cb-th';
-      var headerCb = document.createElement('input');
-      headerCb.type = 'checkbox';
-      headerCb.id = 'md-cb-all';
-      headerCb.title = 'Alle auswählen / abwählen';
-      headerCb.addEventListener('change', function () {
+      var hcb = document.createElement('input');
+      hcb.type = 'checkbox';
+      hcb.id = 'md-cb-all';
+      hcb.title = 'Alle auswählen / abwählen';
+      hcb.addEventListener('change', function () {
         var checked = this.checked;
-        var visCbs = getVisibleCheckboxes();
-        for (var i = 0; i < visCbs.length; i++) {
-          var cb = visCbs[i];
-          var info = cb._mdFileInfo;
-          if (info) {
-            cb.checked = checked;
-            toggleSelect(info, checked, cb.closest('tr'));
+        var cbs = document.querySelectorAll('.md-row-cb');
+        for (var i = 0; i < cbs.length; i++) {
+          var r = cbs[i].closest('tr');
+          if (r && r.style.display !== 'none') {
+            cbs[i].checked = checked;
+            toggleRow(cbs[i].getAttribute('data-key'), checked, r);
           }
         }
       });
-      th.appendChild(headerCb);
+      th.appendChild(hcb);
       thead.insertBefore(th, thead.firstChild);
     }
 
-    // ── Schritt 3: Zeilen-Checkboxen einfügen ───────────────
+    // Zeilen-Checkboxen — IMMER einfügen, für jede Zeile
     var rows = tbody.querySelectorAll('tr');
     for (var i = 0; i < rows.length; i++) {
       var row = rows[i];
-
-      // Schon vorhanden → überspringen
       if (row.querySelector('.md-cb-td')) continue;
 
-      var fileInfo = extractFileInfoFromRow(row);
-      if (!fileInfo) {
-        // Trotzdem eine leere Zelle einfügen damit die Spalten stimmen!
-        var emptyTd = document.createElement('td');
-        emptyTd.className = 'md-cb-td';
-        row.insertBefore(emptyTd, row.firstChild);
-        continue;
-      }
+      // Key aus prev-btn ermitteln (oder Laufindex als Fallback)
+      var prevBtn = row.querySelector('[id^="prev-btn-"]');
+      var key = prevBtn
+        ? prevBtn.id.replace('prev-btn-', '')
+        : ('row-' + i);
 
       var td = document.createElement('td');
       td.className = 'md-cb-td';
@@ -305,19 +207,17 @@
       var cb = document.createElement('input');
       cb.type = 'checkbox';
       cb.className = 'md-row-cb';
-      cb._mdFileInfo = fileInfo;
-      cb.setAttribute('data-fileid', fileInfo.fileId);
-      cb.checked = !!selectedFiles[fileInfo.fileId];
+      cb.setAttribute('data-key', key);
+      cb.checked = !!selectedRows[key];
       if (cb.checked) row.classList.add('md-selected');
 
-      cb.addEventListener('change', (function (info, r) {
-        return function () { toggleSelect(info, this.checked, r); };
-      })(fileInfo, row));
+      cb.addEventListener('change', (function (k, r) {
+        return function () { toggleRow(k, this.checked, r); };
+      })(key, row));
 
       td.appendChild(cb);
       row.insertBefore(td, row.firstChild);
     }
-
     updateBar();
   }
 
@@ -329,28 +229,112 @@
 
     var origRender = window.renderTable;
     window.renderTable = function () {
-      // Vor dem Render: Header-Checkbox entfernen,
-      // damit sie beim Neuaufbau nicht zu Versatz führt
+      // Vor Render: Header-CB entfernen (wird nach Render neu eingefügt)
       var oldTh = document.querySelector('#fileTable thead .md-cb-th');
       if (oldTh) oldTh.remove();
 
       origRender.apply(this, arguments);
-
-      // Nach dem Render: alles synchron neu injizieren
       setTimeout(patchTable, 30);
     };
   }
 
+  // ══════════════════════════════════════════════════════════
+  //  Download: Datei-Info JETZT auflösen (lazy)
+  // ══════════════════════════════════════════════════════════
+
+  /**
+   * Aus einem prev-btn-Key die fileId + name auflösen.
+   * Mehrere Strategien mit Fallback.
+   */
+  function resolveFileInfo(key) {
+    // Strategie 1: Key ist ein numerischer Index → allFiles[idx]
+    var idx = parseInt(key, 10);
+    if (!isNaN(idx) && window.allFiles) {
+      // Durchsuche allFiles — idx könnte direkt passen
+      // oder wir müssen alle durchprobieren
+      var f = window.allFiles[idx];
+      if (f) {
+        var fid = (typeof window.getFileId === 'function')
+                  ? window.getFileId(f) : (f.versionId || f.id);
+        if (fid) return { fileId: fid, name: f.name || 'unbenannt' };
+      }
+    }
+
+    // Strategie 2: Die zugehörige Tabellenzeile finden und dort
+    // den dl-btn oder den Dateinamen auslesen
+    var prevBtn = document.getElementById('prev-btn-' + key);
+    if (!prevBtn) return null;
+    var row = prevBtn.closest('tr');
+    if (!row) return null;
+
+    // 2a: dl-btn onclick parsen
+    var dlBtn = row.querySelector('.dl-btn');
+    if (dlBtn) {
+      var oc = dlBtn.getAttribute('onclick') || '';
+      // Suche nach einer ID (mind. 10 Zeichen, alphanumerisch + - _)
+      var m = oc.match(/['"]([A-Za-z0-9_-]{8,})['"]/);
+      if (m) {
+        return { fileId: m[1], name: getNameFromRow(row) || 'unbenannt' };
+      }
+    }
+
+    // 2b: Dateinamen aus der Zeile → in allFiles/baseFiles suchen
+    var name = getNameFromRow(row);
+    if (name) {
+      var arrs = [window.allFiles, window.baseFiles];
+      for (var a = 0; a < arrs.length; a++) {
+        if (!arrs[a]) continue;
+        for (var j = 0; j < arrs[a].length; j++) {
+          var ff = arrs[a][j];
+          if (ff && ff.name === name) {
+            var fid2 = (typeof window.getFileId === 'function')
+                       ? window.getFileId(ff) : (ff.versionId || ff.id);
+            if (fid2) return { fileId: fid2, name: name };
+          }
+        }
+      }
+    }
+
+    return null;
+  }
+
+  function getNameFromRow(row) {
+    var tds = row.querySelectorAll('td');
+    for (var i = 0; i < tds.length; i++) {
+      if (tds[i].classList.contains('md-cb-td')) continue;
+      if (tds[i].classList.contains('actions-td')) continue;
+      var el = tds[i].querySelector('.file-name, a, span');
+      var t = el ? el.textContent.trim() : tds[i].textContent.trim();
+      if (t && t.length > 1) return t;
+    }
+    return null;
+  }
+
   // ── ZIP-Download ──────────────────────────────────────────
   function startZipDownload() {
-    var files = [];
-    for (var fid in selectedFiles) {
-      if (selectedFiles.hasOwnProperty(fid)) files.push(selectedFiles[fid]);
+    // Alle selektierten Keys → fileInfo auflösen
+    var files = [], skipped = [];
+    for (var key in selectedRows) {
+      if (!selectedRows[key]) continue;
+      var info = resolveFileInfo(key);
+      if (info) {
+        files.push(info);
+      } else {
+        skipped.push(key);
+      }
     }
-    if (files.length === 0) return;
+    if (skipped.length > 0) {
+      console.warn('[multi-download] Konnte ' + skipped.length + ' Dateien nicht auflösen:', skipped);
+    }
+    if (files.length === 0) {
+      if (typeof window.setStatus === 'function')
+        window.setStatus('danger', 'Keine Dateien konnten identifiziert werden.');
+      return;
+    }
+
     isDownloading = true;
     document.getElementById('md-btn-dl').disabled = true;
-    console.log('[multi-download] Start:', files.length, 'Dateien');
+    console.log('[multi-download] Start:', files.length, 'Dateien', JSON.stringify(files));
     ensureJSZip(function () { downloadFilesAsZip(files); });
   }
 
@@ -424,12 +408,9 @@
       document.body.appendChild(a); a.click();
       setTimeout(function () { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
       return;
-    } catch (e) { console.warn('[multi-download] <a> fehlgeschlagen', e); }
-    try {
-      window.open(URL.createObjectURL(blob), '_blank');
-    } catch (e2) {
-      alert('Download konnte nicht gestartet werden.');
-    }
+    } catch (e) { console.warn('[multi-download] <a> failed', e); }
+    try { window.open(URL.createObjectURL(blob), '_blank'); }
+    catch (e2) { alert('Download konnte nicht gestartet werden.'); }
   }
 
   function finishDownload(ok, msg) {
@@ -446,25 +427,18 @@
     createDownloadBar();
     createProgress();
     hookRenderTable();
-
-    // Initiales Patching (Tabelle könnte schon da sein)
     patchTable();
 
-    // MutationObserver als Sicherheitsnetz
     var tbody = document.getElementById('tableBody');
     if (tbody) {
       new MutationObserver(function () {
-        // Kurz warten bis renderTable() fertig ist
         setTimeout(patchTable, 40);
       }).observe(tbody, { childList: true });
     }
-
-    console.log('[multi-download] Modul v1.2 geladen');
+    console.log('[multi-download] Modul v1.3 geladen');
   }
 
-  if (document.readyState === 'loading') {
+  if (document.readyState === 'loading')
     document.addEventListener('DOMContentLoaded', init);
-  } else {
-    init();
-  }
+  else init();
 })();
