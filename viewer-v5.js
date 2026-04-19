@@ -1,6 +1,6 @@
 // ═══════════════════════════════════════════════════════════════
-//  S+L Explorer — Enhanced Viewer v12
-//  Fix: Auge-Highlighting + Alle Viewer synchron aktualisiert
+//  S+L Explorer — Enhanced Viewer v13
+//  Fix: Eingebetteter Viewer kann verborgen werden
 // ═══════════════════════════════════════════════════════════════
 (function() {
 
@@ -11,6 +11,7 @@
   var _currentIdx = -1;
   var _extTrimble = null;
   var _extNative = null;
+  var _inlineHidden = false; // User hat Inline-Viewer bewusst geschlossen
 
   function getDownloadUrl(fileId) {
     return fetch(PROXY_URL + '/core-fs/' + fileId + '/downloadurl?base=' + TC_BASE, {
@@ -35,18 +36,16 @@
     return 'other';
   }
 
+  function hasExternalWindow() {
+    return (_extTrimble && !_extTrimble.closed) || (_extNative && !_extNative.closed);
+  }
+
   // ═══════════════════════════════════════════════════════════════
   //  AUGE-HIGHLIGHTING
-  //  Entfernt .active von allen prev-btns und setzt es auf den
-  //  aktuellen. Funktioniert unabhängig vom Original-Code.
   // ═══════════════════════════════════════════════════════════════
   function updateEyeHighlight(idx) {
-    // Alle prev-btns deaktivieren
     var allBtns = document.querySelectorAll('.prev-btn');
-    for (var i = 0; i < allBtns.length; i++) {
-      allBtns[i].classList.remove('active');
-    }
-    // Aktuelles aktivieren
+    for (var i = 0; i < allBtns.length; i++) allBtns[i].classList.remove('active');
     var activeBtn = document.getElementById('prev-btn-' + idx);
     if (activeBtn) activeBtn.classList.add('active');
   }
@@ -99,7 +98,7 @@
     var btnN = document.createElement('button');
     btnN.className = 'sl-dbtn';
     btnN.id = 'sl-detach-native';
-    btnN.title = 'Externes Fenster mit nativem PDF-Viewer (schärfer, mit Strg+F)';
+    btnN.title = 'Externes Fenster mit nativem PDF-Viewer (sch\u00e4rfer, mit Strg+F)';
     btnN.innerHTML = '<svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6zm-1 1.5L18.5 9H13V3.5zM8 13h8v1H8v-1zm0 3h8v1H8v-1zm0-6h4v1H8v-1z"/></svg><span id="sl-label-native">Nativ</span>';
     btnN.onclick = function() { toggleExtNative(); };
     wrap.appendChild(btnN);
@@ -300,6 +299,31 @@
     }
   }, 500);
 
+  // ─── closePreview überschreiben ───
+  // Wenn User auf X klickt: Inline verbergen, _inlineHidden merken
+  var _origClosePreview = window.closePreview;
+  window.closePreview = function() {
+    // Merken dass User den Inline-Viewer bewusst geschlossen hat
+    _inlineHidden = true;
+
+    // Auge-Highlighting entfernen (nur wenn keine externen Fenster)
+    if (!hasExternalWindow()) {
+      _currentFile = null;
+      _currentIdx = -1;
+      var allBtns = document.querySelectorAll('.prev-btn');
+      for (var i = 0; i < allBtns.length; i++) allBtns[i].classList.remove('active');
+    }
+
+    // Nativ-Fenster: Platzhalter (nur wenn kein externes Fenster aktiv)
+    if (_extNative && !_extNative.closed && !hasExternalWindow()) {
+      showExtPlaceholder(_extNative);
+    }
+
+    // Original closePreview aufrufen (Panel zuklappen)
+    if (typeof _origClosePreview === 'function') _origClosePreview();
+  };
+
+  // ─── openPreview überschreiben ───
   var _origOpenPreview = window.openPreview;
   window.openPreview = function(idx) {
     var file = allFiles[idx];
@@ -310,20 +334,27 @@
 
     if (!_btnInjected) injectDetachButtons();
 
-    // ═══ IMMER das Auge-Highlighting aktualisieren ═══
+    // ═══ IMMER Auge-Highlighting aktualisieren ═══
     updateEyeHighlight(idx);
 
-    // Externe Fenster aktualisieren (falls offen)
+    // ═══ Externe Fenster aktualisieren (falls offen) ═══
     if (_extTrimble && !_extTrimble.closed) {
       loadTrimbleInExternal(file);
     }
-
     if (_extNative && !_extNative.closed) {
       loadNativeInExternal(file);
     }
 
-    // ═══ Eingebetteten Viewer IMMER aktualisieren ═══
-    // So bleibt auch der Inline-Viewer synchron
+    // ═══ Eingebetteten Viewer: NUR öffnen wenn nicht bewusst verborgen ═══
+    if (hasExternalWindow() && _inlineHidden) {
+      // Externes Fenster aktiv UND Inline verborgen → Inline NICHT öffnen
+      // Aber Buttons aktualisieren
+      setTimeout(function() { updateButtons(); }, 100);
+      return;
+    }
+
+    // Inline öffnen (User hat ihn nicht geschlossen, oder es gibt kein externes Fenster)
+    _inlineHidden = false; // Beim nächsten Auge-Klick ohne externes Fenster: wieder öffnen
     if (typeof _origOpenPreview === 'function') {
       _origOpenPreview(idx);
     }
@@ -334,19 +365,5 @@
     }, 100);
   };
 
-  var _origClosePreview = window.closePreview;
-  window.closePreview = function() {
-    _currentFile = null;
-    _currentIdx = -1;
-
-    // Auge-Highlighting entfernen
-    var allBtns = document.querySelectorAll('.prev-btn');
-    for (var i = 0; i < allBtns.length; i++) allBtns[i].classList.remove('active');
-
-    if (_extNative && !_extNative.closed) showExtPlaceholder(_extNative);
-
-    if (typeof _origClosePreview === 'function') _origClosePreview();
-  };
-
-  console.log('[Viewer] Enhanced Viewer v12 geladen (Eye-Highlight Sync)');
+  console.log('[Viewer] Enhanced Viewer v13 geladen (Inline verbergbar)');
 })();
