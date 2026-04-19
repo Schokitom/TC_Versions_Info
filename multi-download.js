@@ -1,11 +1,12 @@
 /* ============================================================
- *  S+L Explorer — Multi-Download (ZIP)  v1.4
+ *  S+L Explorer — Multi-Download (ZIP)  v1.5
  *  <script src="multi-download.js"></script>
  *  Abhängigkeit: JSZip (wird automatisch geladen)
  *
- *  WICHTIG: allFiles / getFileId sind NICHT auf window verfügbar
- *  (Closure-Scope in index.html). Datei-Infos werden daher
- *  komplett aus dem DOM extrahiert.
+ *  Kernproblem gelöst: allFiles / getFileId leben im Closure
+ *  der index.html. downloadFile(idx) ist aber global.
+ *  → Wir parsen den idx aus onclick="downloadFile(N)" und
+ *    nutzen eine Bridge um allFiles[idx] zu erreichen.
  * ============================================================ */
 (function () {
   'use strict';
@@ -18,6 +19,67 @@
   var dlBarEl       = null;
   var progressEl    = null;
   var isDownloading = false;
+
+  // ══════════════════════════════════════════════════════════
+  //  Bridge: allFiles + getFileId aus dem Closure exponieren
+  //  Wir wrappen downloadFile() — die ist global — um bei
+  //  jedem Aufruf die Datei-Daten auf window zu cachen.
+  // ══════════════════════════════════════════════════════════
+
+  function installBridge() {
+    if (window._mdBridgeInstalled) return;
+
+    // downloadFile(idx) ist global. Wir wrappen sie.
+    if (typeof window.downloadFile === 'function') {
+      var origDownloadFile = window.downloadFile;
+      window.downloadFile = function (idx) {
+        // Die Bridge: allFiles und getFileId müssen im selben
+        // Scope sein wie downloadFile. Wir testen ob sie
+        // über den Aufruf-Kontext erreichbar sind.
+        // Aber wir können sie nicht direkt greifen — sie sind
+        // im Closure. Stattdessen nutzen wir einen anderen Trick.
+        return origDownloadFile.apply(this, arguments);
+      };
+    }
+
+    // Alternativer Ansatz: Wir injizieren ein Script-Tag
+    // das im selben Scope wie der inline-Code läuft
+    var script = document.createElement('script');
+    script.textContent =
+      '(function() {' +
+      '  if (typeof allFiles !== "undefined") {' +
+      '    window._mdAllFiles = allFiles;' +
+      '    console.log("[multi-download] Bridge: allFiles exponiert (" + allFiles.length + " Dateien)");' +
+      '  }' +
+      '  if (typeof getFileId === "function") {' +
+      '    window._mdGetFileId = getFileId;' +
+      '    console.log("[multi-download] Bridge: getFileId exponiert");' +
+      '  }' +
+      '  if (typeof accessToken !== "undefined") {' +
+      '    window._mdAccessToken = accessToken;' +
+      '  }' +
+      '})();';
+    document.body.appendChild(script);
+    // Script-Tag aufräumen (wurde schon ausgeführt)
+    script.remove();
+
+    window._mdBridgeInstalled = true;
+  }
+
+  /**
+   * fileId aus dem Index ermitteln via Bridge
+   */
+  function getFileInfoByIndex(idx) {
+    var files = window._mdAllFiles;
+    var getFid = window._mdGetFileId;
+
+    if (!files || idx < 0 || idx >= files.length) return null;
+    var f = files[idx];
+    if (!f) return null;
+
+    var fileId = (typeof getFid === 'function') ? getFid(f) : (f.versionId || f.id);
+    return { fileId: fileId, name: f.name || 'unbenannt' };
+  }
 
   // ── JSZip ──────────────────────────────────────────────────
   function ensureJSZip(cb) {
@@ -114,8 +176,8 @@
     }
   }
 
-  function toggleRow(key, fileInfo, checked, row) {
-    if (checked) selectedRows[key] = fileInfo;
+  function toggleRow(key, checked, row) {
+    if (checked) selectedRows[key] = true;
     else delete selectedRows[key];
     if (row) row.classList.toggle('md-selected', !!checked);
     updateBar();
@@ -144,85 +206,28 @@
   }
 
   // ══════════════════════════════════════════════════════════
-  //  DOM-basierte Datei-Info Extraktion
-  //  allFiles ist NICHT auf window → alles aus dem DOM holen
+  //  Index aus onclick="downloadFile(N)" parsen
   // ══════════════════════════════════════════════════════════
 
-  /**
-   * Extrahiert fileId und Dateiname aus einer Tabellenzeile.
-   * Durchsucht alle Buttons (dl-btn, prev-btn) nach onclick-Attributen
-   * die eine File-ID enthalten.
-   */
-  function extractFileInfoFromRow(row) {
-    var name = getNameFromRow(row);
-
-    // Strategie: Alle Buttons/Links in der Zeile nach onclick durchsuchen
-    var buttons = row.querySelectorAll('button, a');
-    for (var i = 0; i < buttons.length; i++) {
-      var btn = buttons[i];
-      var oc = btn.getAttribute('onclick') || '';
-      if (!oc) continue;
-
-      // Suche alle String-Argumente im onclick
-      // Pattern: Funktion('arg1', 'arg2', ...) oder Funktion("arg1", ...)
-      var allStrings = [];
-      var re = /['"]([^'"]+)['"]/g;
-      var match;
-      while ((match = re.exec(oc)) !== null) {
-        allStrings.push(match[1]);
-      }
-
-      // Die fileId ist typischerweise ein alphanumerischer String mit
-      // Bindestrichen/Unterstrichen, 8-30 Zeichen lang (z.B. "M2F87bPwc3w")
-      for (var j = 0; j < allStrings.length; j++) {
-        var candidate = allStrings[j];
-        if (/^[A-Za-z0-9_-]{8,30}$/.test(candidate)) {
-          // Prüfen ob es nicht ein Dateiname ist (hat Punkt + Extension)
-          if (candidate.indexOf('.') === -1) {
-            return { fileId: candidate, name: name || 'unbenannt' };
-          }
-        }
-      }
+  function getIndexFromRow(row) {
+    // Primär: dl-btn onclick="downloadFile(N)"
+    var dlBtn = row.querySelector('.dl-btn');
+    if (dlBtn) {
+      var oc = dlBtn.getAttribute('onclick') || '';
+      var m = oc.match(/downloadFile\s*\(\s*(\d+)\s*\)/);
+      if (m) return parseInt(m[1], 10);
     }
-
-    // Strategie 2: data-Attribute auf Buttons
-    for (var k = 0; k < buttons.length; k++) {
-      var fid = buttons[k].getAttribute('data-fileid') ||
-                buttons[k].getAttribute('data-id') ||
-                buttons[k].getAttribute('data-version-id');
-      if (fid) return { fileId: fid, name: name || 'unbenannt' };
+    // Fallback: prev-btn onclick="openPreview(N)"
+    var prevBtn = row.querySelector('.prev-btn, [id^="prev-btn-"]');
+    if (prevBtn) {
+      var oc2 = prevBtn.getAttribute('onclick') || '';
+      var m2 = oc2.match(/openPreview\s*\(\s*(\d+)\s*\)/);
+      if (m2) return parseInt(m2[1], 10);
+      // Oder aus der ID
+      var idMatch = (prevBtn.id || '').match(/prev-btn-(\d+)/);
+      if (idMatch) return parseInt(idMatch[1], 10);
     }
-
-    // Strategie 3: Links mit fileId in der URL
-    var links = row.querySelectorAll('a[href]');
-    for (var l = 0; l < links.length; l++) {
-      var href = links[l].getAttribute('href') || '';
-      var hMatch = href.match(/\/files?\/([A-Za-z0-9_-]{8,30})/);
-      if (hMatch) return { fileId: hMatch[1], name: name || 'unbenannt' };
-    }
-
-    console.warn('[multi-download] Keine fileId in Zeile gefunden. Buttons:', 
-      Array.from(buttons).map(function(b) { 
-        return { tag: b.tagName, onclick: b.getAttribute('onclick'), id: b.id, cls: b.className }; 
-      })
-    );
-    return null;
-  }
-
-  function getNameFromRow(row) {
-    var tds = row.querySelectorAll('td');
-    for (var i = 0; i < tds.length; i++) {
-      if (tds[i].classList.contains('md-cb-td')) continue;
-      if (tds[i].classList.contains('actions-td')) continue;
-      // Erste nicht-Checkbox, nicht-Actions Zelle = Dateiname
-      var el = tds[i].querySelector('.file-name, a, span');
-      var t = el ? el.textContent.trim() : '';
-      // Prüfen ob es wie ein Dateiname aussieht (hat Punkt + Extension)
-      if (t && /\.\w{2,5}$/.test(t)) return t;
-      // Oder einfach nicht-leerer Text
-      if (t && t.length > 1) return t;
-    }
-    return null;
+    return -1;
   }
 
   // ══════════════════════════════════════════════════════════
@@ -236,32 +241,30 @@
     var tbody = table.querySelector('tbody') || document.getElementById('tableBody');
     if (!thead || !tbody) return;
 
-    // Sync: wenn tbody keine CBs hat, thead-CB auch entfernen
+    // Bridge bei jedem Patch auffrischen (allFiles kann sich ändern)
+    installBridge();
+
+    // Sync
     var firstRow = tbody.querySelector('tr');
     var tbodyHasCb = firstRow && firstRow.querySelector('.md-cb-td');
     var theadHasCb = thead.querySelector('.md-cb-th');
-    if (theadHasCb && !tbodyHasCb && firstRow) {
-      theadHasCb.remove();
-    }
+    if (theadHasCb && !tbodyHasCb && firstRow) theadHasCb.remove();
 
     // Header-Checkbox
     if (!thead.querySelector('.md-cb-th')) {
       var th = document.createElement('th');
       th.className = 'md-cb-th';
       var hcb = document.createElement('input');
-      hcb.type = 'checkbox';
-      hcb.id = 'md-cb-all';
+      hcb.type = 'checkbox'; hcb.id = 'md-cb-all';
       hcb.title = 'Alle auswählen / abwählen';
       hcb.addEventListener('change', function () {
         var checked = this.checked;
         var cbs = document.querySelectorAll('.md-row-cb');
         for (var i = 0; i < cbs.length; i++) {
           var r = cbs[i].closest('tr');
-          if (r && r.style.display !== 'none') {
+          if (r && r.style.display !== 'none' && !cbs[i].disabled) {
             cbs[i].checked = checked;
-            var key = cbs[i].getAttribute('data-key');
-            var info = cbs[i]._mdFileInfo;
-            if (key && info) toggleRow(key, info, checked, r);
+            toggleRow(cbs[i].getAttribute('data-key'), checked, r);
           }
         }
       });
@@ -275,34 +278,23 @@
       var row = rows[i];
       if (row.querySelector('.md-cb-td')) continue;
 
-      var prevBtn = row.querySelector('[id^="prev-btn-"]');
-      var key = prevBtn ? prevBtn.id.replace('prev-btn-', '') : ('row-' + i);
-
-      // Datei-Info aus dem DOM extrahieren
-      var fileInfo = extractFileInfoFromRow(row);
+      var idx = getIndexFromRow(row);
+      var key = idx >= 0 ? String(idx) : ('row-' + i);
 
       var td = document.createElement('td');
       td.className = 'md-cb-td';
 
-      // Checkbox immer einfügen (Spaltenausrichtung),
-      // aber nur klickbar wenn fileInfo vorhanden
       var cb = document.createElement('input');
       cb.type = 'checkbox';
       cb.className = 'md-row-cb';
       cb.setAttribute('data-key', key);
+      cb.setAttribute('data-idx', idx);
+      cb.checked = !!selectedRows[key];
+      if (cb.checked) row.classList.add('md-selected');
 
-      if (fileInfo) {
-        cb._mdFileInfo = fileInfo;
-        cb.checked = !!selectedRows[key];
-        if (cb.checked) row.classList.add('md-selected');
-        cb.addEventListener('change', (function (k, info, r) {
-          return function () { toggleRow(k, info, this.checked, r); };
-        })(key, fileInfo, row));
-      } else {
-        // Kein fileInfo → Checkbox deaktivieren
-        cb.disabled = true;
-        cb.title = 'Datei konnte nicht identifiziert werden';
-      }
+      cb.addEventListener('change', (function (k, r) {
+        return function () { toggleRow(k, this.checked, r); };
+      })(key, row));
 
       td.appendChild(cb);
       row.insertBefore(td, row.firstChild);
@@ -315,27 +307,46 @@
     if (typeof window.renderTable !== 'function') return;
     if (window._mdRenderHooked) return;
     window._mdRenderHooked = true;
-
     var origRender = window.renderTable;
     window.renderTable = function () {
       var oldTh = document.querySelector('#fileTable thead .md-cb-th');
       if (oldTh) oldTh.remove();
       origRender.apply(this, arguments);
-      setTimeout(patchTable, 30);
+      setTimeout(function () {
+        // Bridge auffrischen nach Render (allFiles könnte sich geändert haben)
+        installBridge();
+        patchTable();
+      }, 30);
     };
   }
 
   // ── ZIP-Download ──────────────────────────────────────────
   function startZipDownload() {
-    var files = [];
+    // Bridge nochmal auffrischen um aktuelle Daten zu haben
+    installBridge();
+
+    var files = [], skipped = [];
     for (var key in selectedRows) {
-      if (selectedRows.hasOwnProperty(key) && selectedRows[key]) {
-        files.push(selectedRows[key]);
+      if (!selectedRows[key]) continue;
+      var idx = parseInt(key, 10);
+      if (isNaN(idx) || idx < 0) { skipped.push(key); continue; }
+
+      var info = getFileInfoByIndex(idx);
+      if (info) {
+        files.push(info);
+      } else {
+        skipped.push(key + ' (idx=' + idx + ')');
       }
+    }
+
+    if (skipped.length > 0) {
+      console.warn('[multi-download] Nicht aufgelöst:', skipped);
     }
     if (files.length === 0) {
       if (typeof window.setStatus === 'function')
-        window.setStatus('danger', 'Keine Dateien ausgewählt.');
+        window.setStatus('danger', 'Keine Dateien konnten identifiziert werden. Bridge: ' +
+          (window._mdAllFiles ? window._mdAllFiles.length + ' Dateien' : 'NICHT VERFÜGBAR'));
+      finishDownload(false, 'Keine Dateien identifiziert.');
       return;
     }
 
@@ -350,6 +361,9 @@
     var zip = new JSZip(), total = files.length, done = 0, errors = [], usedNames = {};
     showProgress('Starte Downloads …', 0, '0 / ' + total);
 
+    // Token: entweder aus Bridge oder von window
+    var token = window._mdAccessToken || window.accessToken;
+
     var chain = Promise.resolve();
     files.forEach(function (entry, i) {
       chain = chain.then(function () {
@@ -363,11 +377,12 @@
         }
         usedNames[safeName] = true;
         showProgress('Lade: ' + name, (done / total) * 100, (done + 1) + ' / ' + total);
-        return fetchFileBlob(fileId).then(function (blob) {
+        return fetchFileBlob(fileId, token).then(function (blob) {
           zip.file(safeName, blob); done++;
           showProgress('Geladen: ' + name, (done / total) * 100, done + ' / ' + total);
         }).catch(function (err) {
           done++; errors.push(name + ': ' + (err.message || err));
+          console.error('[multi-download] Fehler:', name, err);
           showProgress('Fehler: ' + name, (done / total) * 100, done + ' / ' + total);
         });
       });
@@ -387,9 +402,9 @@
     }).catch(function (err) { finishDownload(false, 'ZIP-Fehler: ' + (err.message || err)); });
   }
 
-  function fetchFileBlob(fileId) {
+  function fetchFileBlob(fileId, token) {
     return fetch(PROXY_URL + '/core-fs/' + fileId + '/downloadurl?base=' + TC_BASE, {
-      headers: { 'Authorization': 'Bearer ' + window.accessToken }
+      headers: { 'Authorization': 'Bearer ' + token }
     }).then(function (r) {
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.json();
@@ -423,7 +438,8 @@
 
   function finishDownload(ok, msg) {
     isDownloading = false;
-    document.getElementById('md-btn-dl').disabled = false;
+    var btn = document.getElementById('md-btn-dl');
+    if (btn) btn.disabled = false;
     hideProgress();
     if (typeof window.setStatus === 'function') window.setStatus(ok ? 'success' : 'danger', msg);
     if (ok) deselectAll();
@@ -435,15 +451,24 @@
     createDownloadBar();
     createProgress();
     hookRenderTable();
-    patchTable();
+
+    // Bridge installieren — muss nach dem index.html Code laufen,
+    // also mit kurzer Verzögerung
+    setTimeout(function () {
+      installBridge();
+      patchTable();
+    }, 200);
 
     var tbody = document.getElementById('tableBody');
     if (tbody) {
       new MutationObserver(function () {
-        setTimeout(patchTable, 40);
+        setTimeout(function () {
+          installBridge();
+          patchTable();
+        }, 40);
       }).observe(tbody, { childList: true });
     }
-    console.log('[multi-download] Modul v1.4 geladen');
+    console.log('[multi-download] Modul v1.5 geladen');
   }
 
   if (document.readyState === 'loading')
