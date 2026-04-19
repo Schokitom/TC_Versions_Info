@@ -513,6 +513,76 @@
       scopeCheck.removeAttribute('onchange');
       scopeCheck.addEventListener('change', function() { _doFilter(); });
     }
+
+    // ═══ "Aktualisieren" Button → "Reset" Button umwandeln ═══
+    convertResetButton();
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  //  RESET-BUTTON
+  //  Ersetzt den "Aktualisieren" Button durch einen "Reset" Button
+  //  der alle Filter zurücksetzt (außer Dateiarten + Baumstruktur)
+  // ═══════════════════════════════════════════════════════════════
+  function convertResetButton() {
+    // Button finden: der letzte .btn.primary im Toolbar mit onclick="loadFiles()"
+    var toolbar = document.getElementById('toolbar');
+    if (!toolbar) return;
+    var buttons = toolbar.querySelectorAll('.btn.primary');
+    var resetBtn = null;
+    for (var i = 0; i < buttons.length; i++) {
+      var attr = buttons[i].getAttribute('onclick');
+      if (attr && attr.indexOf('loadFiles') >= 0) {
+        resetBtn = buttons[i];
+        break;
+      }
+    }
+    if (!resetBtn) return;
+
+    // Button umgestalten
+    resetBtn.removeAttribute('onclick');
+    resetBtn.innerHTML =
+      '<svg viewBox="0 0 24 24"><path d="M17.65 6.35A7.958 7.958 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>' +
+      'Reset';
+    resetBtn.title = 'Alle Filter zur\u00fccksetzen (Dateiarten und Ordnerauswahl bleiben)';
+    resetBtn.onclick = function() { doReset(); };
+  }
+
+  function doReset() {
+    // 1. Suchfeld leeren
+    var searchInput = document.getElementById('searchInput');
+    if (searchInput) searchInput.value = '';
+
+    // 2. "Gesamten Explorer" Checkbox deaktivieren
+    var scopeCheck = document.getElementById('searchScopeCheck');
+    if (scopeCheck) scopeCheck.checked = false;
+
+    // 3. searchResultFiles zurücksetzen
+    searchResultFiles = null;
+
+    // 4. Abort laufende Suchen
+    if (typeof searchAllAbortController !== 'undefined' && searchAllAbortController) {
+      searchAllAbortController.abort();
+      searchAllAbortController = null;
+    }
+
+    // 5. Volltextsuche zurücksetzen
+    hideFtsSearch();
+    _indexedFileIds = {};
+    updateFtsButton('default', '');
+
+    // 6. Pfadfilter zurücksetzen (alle Pfade auswählen)
+    if (typeof selectAllPaths === 'function') {
+      try { selectAllPaths(); } catch(e) {}
+    }
+
+    // 7. allFiles auf baseFiles zurücksetzen
+    allFiles = baseFiles.slice();
+
+    // 8. Tabelle neu rendern
+    renderTable();
+
+    // 9. Status aktualisieren
+    setStatus('ok', 'Filter zur\u00fcckgesetzt');
   }
 
   var _searchAllDebounce = null;
