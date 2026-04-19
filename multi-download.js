@@ -1,110 +1,102 @@
 /* ============================================================
- *  S+L Explorer — Multi-Download (ZIP)  v1.1
+ *  S+L Explorer — Multi-Download (ZIP)  v1.2
  *  Separates Modul: <script src="multi-download.js"></script>
  *  Abhängigkeit: JSZip (wird automatisch geladen)
+ *
+ *  Fix v1.2: Spaltenversatz behoben — thead und tbody werden
+ *  immer synchron gepatcht. renderTable() überschreibt tbody
+ *  komplett, daher wird bei jedem Render alles neu injiziert.
  * ============================================================ */
 (function () {
   'use strict';
 
-  // ── Konfiguration ──────────────────────────────────────────
-  var PROXY_URL  = 'https://slproxy.schoknechtthomas.workers.dev';
-  var TC_BASE    = 'https://app21.connect.trimble.com';
-  var JSZIP_CDN  = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+  var PROXY_URL = 'https://slproxy.schoknechtthomas.workers.dev';
+  var TC_BASE   = 'https://app21.connect.trimble.com';
+  var JSZIP_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
 
-  // ── State ──────────────────────────────────────────────────
-  // Speichert Datei-Infos direkt: { "fileId": { fileId, name }, ... }
-  var selectedFiles = {};
+  var selectedFiles = {};   // { fileId: { fileId, name } }
   var dlBarEl       = null;
   var progressEl    = null;
   var isDownloading = false;
 
-  // ── JSZip laden (einmalig) ─────────────────────────────────
+  // ── JSZip ──────────────────────────────────────────────────
   function ensureJSZip(cb) {
     if (window.JSZip) return cb();
-    var s   = document.createElement('script');
-    s.src   = JSZIP_CDN;
-    s.onload = function () { cb(); };
-    s.onerror = function () {
-      alert('JSZip konnte nicht geladen werden. Bitte Internetverbindung prüfen.');
-    };
+    var s = document.createElement('script');
+    s.src = JSZIP_CDN;
+    s.onload  = function () { cb(); };
+    s.onerror = function () { alert('JSZip konnte nicht geladen werden.'); };
     document.head.appendChild(s);
   }
 
-  // ── CSS injizieren ─────────────────────────────────────────
+  // ── CSS ────────────────────────────────────────────────────
   function injectStyles() {
     if (document.getElementById('md-styles')) return;
     var style = document.createElement('style');
-    style.id  = 'md-styles';
-    style.textContent = [
-      '.md-cb-th, .md-cb-td {',
-      '  width: 36px; min-width: 36px; max-width: 36px;',
-      '  text-align: center; vertical-align: middle;',
-      '  padding: 4px 6px !important;',
-      '}',
-      '.md-cb-th input, .md-cb-td input {',
-      '  width: 16px; height: 16px; cursor: pointer;',
-      '  accent-color: var(--accent, #00c2ff);',
-      '}',
-      '#md-download-bar {',
-      '  position: fixed; bottom: 60px; left: 50%;',
-      '  transform: translateX(-50%);',
-      '  background: var(--surface, #1a1d27);',
-      '  border: 1px solid var(--accent, #00c2ff);',
-      '  border-radius: 12px;',
-      '  padding: 10px 20px;',
-      '  display: none; align-items: center; gap: 14px;',
-      '  z-index: 9000;',
-      '  box-shadow: 0 4px 24px rgba(0,194,255,.25);',
-      '  font-family: var(--font-ui, "DM Sans", sans-serif);',
-      '  color: var(--text, #e4e8f0);',
-      '  animation: md-slide-up .25s ease-out;',
-      '}',
-      '@keyframes md-slide-up {',
-      '  from { opacity:0; transform: translateX(-50%) translateY(20px); }',
-      '  to   { opacity:1; transform: translateX(-50%) translateY(0); }',
-      '}',
-      '#md-download-bar .md-count { font-weight: 600; font-size: 14px; white-space: nowrap; }',
-      '#md-download-bar .md-btn {',
-      '  background: var(--accent, #00c2ff);',
-      '  color: #000; border: none; border-radius: 8px;',
-      '  padding: 8px 18px; font-weight: 700; font-size: 13px;',
-      '  cursor: pointer; display: flex; align-items: center; gap: 6px;',
-      '  font-family: var(--font-ui, "DM Sans", sans-serif);',
-      '  transition: background .15s, transform .1s;',
-      '}',
-      '#md-download-bar .md-btn:hover { background: #33d1ff; transform: scale(1.03); }',
-      '#md-download-bar .md-btn:active { transform: scale(.97); }',
-      '#md-download-bar .md-btn:disabled { opacity:.5; cursor:not-allowed; transform:none; }',
-      '#md-download-bar .md-btn-cancel {',
-      '  background: transparent; color: var(--muted, #7a8199);',
-      '  border: 1px solid var(--border, #2a2d3e);',
-      '  border-radius: 8px; padding: 8px 14px; font-size: 13px;',
-      '  cursor: pointer; font-family: var(--font-ui, "DM Sans", sans-serif);',
-      '}',
-      '#md-download-bar .md-btn-cancel:hover { color: var(--text, #e4e8f0); border-color: var(--muted); }',
-      '#md-progress {',
-      '  position: fixed; bottom: 120px; left: 50%;',
-      '  transform: translateX(-50%);',
-      '  background: var(--surface, #1a1d27);',
-      '  border: 1px solid var(--border, #2a2d3e);',
-      '  border-radius: 12px;',
-      '  padding: 16px 24px;',
-      '  display: none; flex-direction: column; gap: 8px;',
-      '  z-index: 9001; min-width: 320px;',
-      '  box-shadow: 0 4px 24px rgba(0,0,0,.4);',
-      '  font-family: var(--font-ui, "DM Sans", sans-serif);',
-      '  color: var(--text, #e4e8f0);',
-      '}',
-      '#md-progress .md-prog-label { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }',
-      '#md-progress .md-prog-track { height: 6px; background: var(--border, #2a2d3e); border-radius: 3px; overflow: hidden; }',
-      '#md-progress .md-prog-fill { height: 100%; background: var(--accent, #00c2ff); border-radius: 3px; width: 0%; transition: width .3s ease; }',
-      '#md-progress .md-prog-detail { font-size: 11px; color: var(--muted, #7a8199); }',
-      '#fileTable tbody tr.md-selected { background: rgba(0,194,255,.06) !important; }',
-    ].join('\n');
+    style.id = 'md-styles';
+    style.textContent =
+      '.md-cb-th, .md-cb-td {' +
+      '  width: 36px !important; min-width: 36px !important; max-width: 36px !important;' +
+      '  text-align: center !important; vertical-align: middle !important;' +
+      '  padding: 4px 6px !important; box-sizing: border-box !important;' +
+      '}' +
+      '.md-cb-th input, .md-cb-td input {' +
+      '  width: 16px; height: 16px; cursor: pointer;' +
+      '  accent-color: var(--accent, #00c2ff);' +
+      '}' +
+      '#md-download-bar {' +
+      '  position: fixed; bottom: 60px; left: 50%;' +
+      '  transform: translateX(-50%);' +
+      '  background: var(--surface, #1a1d27);' +
+      '  border: 1px solid var(--accent, #00c2ff);' +
+      '  border-radius: 12px; padding: 10px 20px;' +
+      '  display: none; align-items: center; gap: 14px;' +
+      '  z-index: 9000;' +
+      '  box-shadow: 0 4px 24px rgba(0,194,255,.25);' +
+      '  font-family: var(--font-ui, "DM Sans", sans-serif);' +
+      '  color: var(--text, #e4e8f0);' +
+      '  animation: md-slide-up .25s ease-out;' +
+      '}' +
+      '@keyframes md-slide-up {' +
+      '  from { opacity:0; transform: translateX(-50%) translateY(20px); }' +
+      '  to   { opacity:1; transform: translateX(-50%) translateY(0); }' +
+      '}' +
+      '#md-download-bar .md-count { font-weight:600; font-size:14px; white-space:nowrap; }' +
+      '#md-download-bar .md-btn {' +
+      '  background: var(--accent, #00c2ff); color: #000; border: none;' +
+      '  border-radius: 8px; padding: 8px 18px; font-weight: 700; font-size: 13px;' +
+      '  cursor: pointer; display: flex; align-items: center; gap: 6px;' +
+      '  font-family: var(--font-ui, "DM Sans", sans-serif);' +
+      '  transition: background .15s, transform .1s;' +
+      '}' +
+      '#md-download-bar .md-btn:hover { background:#33d1ff; transform:scale(1.03); }' +
+      '#md-download-bar .md-btn:active { transform:scale(.97); }' +
+      '#md-download-bar .md-btn:disabled { opacity:.5; cursor:not-allowed; transform:none; }' +
+      '#md-download-bar .md-btn-cancel {' +
+      '  background:transparent; color:var(--muted,#7a8199);' +
+      '  border:1px solid var(--border,#2a2d3e); border-radius:8px;' +
+      '  padding:8px 14px; font-size:13px; cursor:pointer;' +
+      '  font-family: var(--font-ui, "DM Sans", sans-serif);' +
+      '}' +
+      '#md-download-bar .md-btn-cancel:hover { color:var(--text,#e4e8f0); border-color:var(--muted); }' +
+      '#md-progress {' +
+      '  position:fixed; bottom:120px; left:50%; transform:translateX(-50%);' +
+      '  background:var(--surface,#1a1d27); border:1px solid var(--border,#2a2d3e);' +
+      '  border-radius:12px; padding:16px 24px;' +
+      '  display:none; flex-direction:column; gap:8px;' +
+      '  z-index:9001; min-width:320px;' +
+      '  box-shadow:0 4px 24px rgba(0,0,0,.4);' +
+      '  font-family:var(--font-ui,"DM Sans",sans-serif); color:var(--text,#e4e8f0);' +
+      '}' +
+      '#md-progress .md-prog-label { font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }' +
+      '#md-progress .md-prog-track { height:6px; background:var(--border,#2a2d3e); border-radius:3px; overflow:hidden; }' +
+      '#md-progress .md-prog-fill  { height:100%; background:var(--accent,#00c2ff); border-radius:3px; width:0%; transition:width .3s ease; }' +
+      '#md-progress .md-prog-detail { font-size:11px; color:var(--muted,#7a8199); }' +
+      '#fileTable tbody tr.md-selected { background:rgba(0,194,255,.06) !important; }';
     document.head.appendChild(style);
   }
 
-  // ── Download-Leiste (DOM) ──────────────────────────────────
+  // ── Download-Leiste ────────────────────────────────────────
   function createDownloadBar() {
     if (dlBarEl) return;
     dlBarEl = document.createElement('div');
@@ -114,21 +106,18 @@
       '<button class="md-btn" id="md-btn-dl">' +
         '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' +
           '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>' +
-          '<polyline points="7 10 12 15 17 10"/>' +
-          '<line x1="12" y1="15" x2="12" y2="3"/>' +
-        '</svg> ' +
-        '<span>ZIP herunterladen</span>' +
+          '<polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>' +
+        '</svg><span>ZIP herunterladen</span>' +
       '</button>' +
       '<button class="md-btn-cancel" id="md-btn-deselect">Auswahl aufheben</button>';
     document.body.appendChild(dlBarEl);
-
     document.getElementById('md-btn-dl').addEventListener('click', function () {
       if (!isDownloading) startZipDownload();
     });
     document.getElementById('md-btn-deselect').addEventListener('click', deselectAll);
   }
 
-  // ── Fortschrittsanzeige (DOM) ──────────────────────────────
+  // ── Fortschritt ────────────────────────────────────────────
   function createProgress() {
     if (progressEl) return;
     progressEl = document.createElement('div');
@@ -139,7 +128,6 @@
       '<div class="md-prog-detail"></div>';
     document.body.appendChild(progressEl);
   }
-
   function showProgress(label, pct, detail) {
     if (!progressEl) createProgress();
     progressEl.style.display = 'flex';
@@ -147,15 +135,10 @@
     progressEl.querySelector('.md-prog-fill').style.width  = Math.round(pct) + '%';
     progressEl.querySelector('.md-prog-detail').textContent = detail || '';
   }
+  function hideProgress() { if (progressEl) progressEl.style.display = 'none'; }
 
-  function hideProgress() {
-    if (progressEl) progressEl.style.display = 'none';
-  }
-
-  // ── Auswahl-Logik ─────────────────────────────────────────
-  function getSelectedCount() {
-    return Object.keys(selectedFiles).length;
-  }
+  // ── Auswahl-State ─────────────────────────────────────────
+  function getSelectedCount() { return Object.keys(selectedFiles).length; }
 
   function updateBar() {
     var count = getSelectedCount();
@@ -168,18 +151,15 @@
     }
     var headerCb = document.getElementById('md-cb-all');
     if (headerCb) {
-      var visibleCount = getVisibleCheckboxes().length;
-      headerCb.checked       = visibleCount > 0 && count >= visibleCount;
-      headerCb.indeterminate = count > 0 && count < visibleCount;
+      var vis = getVisibleCheckboxes().length;
+      headerCb.checked       = vis > 0 && count >= vis;
+      headerCb.indeterminate = count > 0 && count < vis;
     }
   }
 
   function toggleSelect(fileInfo, checked, row) {
-    if (checked) {
-      selectedFiles[fileInfo.fileId] = fileInfo;
-    } else {
-      delete selectedFiles[fileInfo.fileId];
-    }
+    if (checked) selectedFiles[fileInfo.fileId] = fileInfo;
+    else delete selectedFiles[fileInfo.fileId];
     if (row) row.classList.toggle('md-selected', !!checked);
     updateBar();
   }
@@ -193,8 +173,6 @@
     updateBar();
   }
 
-  // ── Hilfsfunktionen ───────────────────────────────────────
-
   function getVisibleCheckboxes() {
     var result = [];
     var cbs = document.querySelectorAll('.md-row-cb');
@@ -205,133 +183,145 @@
     return result;
   }
 
-  /**
-   * Liest die Datei-Info (fileId + name) aus einer Tabellenzeile.
-   * 3 Strategien mit Fallback-Kette:
-   */
+  // ── Datei-Info aus Zeile extrahieren ───────────────────────
   function extractFileInfoFromRow(row) {
     var prevBtn = row.querySelector('[id^="prev-btn-"]');
-    var idx = -1;
-
-    // 1) prev-btn-{idx} → allFiles[idx]
     if (prevBtn) {
-      idx = parseInt(prevBtn.id.replace('prev-btn-', ''), 10);
+      var idx = parseInt(prevBtn.id.replace('prev-btn-', ''), 10);
       if (!isNaN(idx) && window.allFiles && idx >= 0 && idx < window.allFiles.length) {
         var f = window.allFiles[idx];
         if (f) {
           var fileId = (typeof window.getFileId === 'function')
-                       ? window.getFileId(f)
-                       : (f.versionId || f.id);
+                       ? window.getFileId(f) : (f.versionId || f.id);
           if (fileId) return { fileId: fileId, name: f.name || 'unbenannt' };
         }
       }
     }
-
-    // 2) dl-btn onclick-Attribut parsen
+    // Fallback: dl-btn onclick parsen
     var dlBtn = row.querySelector('.dl-btn');
     if (dlBtn) {
       var oc = dlBtn.getAttribute('onclick') || '';
       var m = oc.match(/['"]([A-Za-z0-9_-]{10,})['"]/);
-      if (m) {
-        var nameFromTd = getNameFromFirstTd(row);
-        return { fileId: m[1], name: nameFromTd || 'unbenannt' };
-      }
+      if (m) return { fileId: m[1], name: getNameFromRow(row) || 'unbenannt' };
     }
-
-    // 3) Name aus der Zeile → in allFiles/baseFiles suchen
-    var name = getNameFromFirstTd(row);
+    // Fallback: Name → allFiles/baseFiles suchen
+    var name = getNameFromRow(row);
     if (name) {
-      var arrays = [window.allFiles, window.baseFiles];
-      for (var a = 0; a < arrays.length; a++) {
-        var arr = arrays[a];
-        if (!arr) continue;
-        for (var i = 0; i < arr.length; i++) {
-          if (arr[i] && arr[i].name === name) {
+      var arrs = [window.allFiles, window.baseFiles];
+      for (var a = 0; a < arrs.length; a++) {
+        if (!arrs[a]) continue;
+        for (var i = 0; i < arrs[a].length; i++) {
+          var ff = arrs[a][i];
+          if (ff && ff.name === name) {
             var fid = (typeof window.getFileId === 'function')
-                      ? window.getFileId(arr[i])
-                      : (arr[i].versionId || arr[i].id);
+                      ? window.getFileId(ff) : (ff.versionId || ff.id);
             if (fid) return { fileId: fid, name: name };
           }
         }
       }
     }
-
-    console.warn('[multi-download] Konnte fileId nicht ermitteln. idx=' + idx +
-                 ', allFiles.length=' + (window.allFiles ? window.allFiles.length : 'N/A'));
     return null;
   }
 
-  function getNameFromFirstTd(row) {
-    // Checkbox-td überspringen: zweite td ist die Name-Spalte
+  function getNameFromRow(row) {
     var tds = row.querySelectorAll('td');
     for (var i = 0; i < tds.length; i++) {
       if (tds[i].classList.contains('md-cb-td')) continue;
-      var nameEl = tds[i].querySelector('.file-name, a, span');
-      var t = nameEl ? nameEl.textContent.trim() : tds[i].textContent.trim();
+      var el = tds[i].querySelector('.file-name, a, span');
+      var t = el ? el.textContent.trim() : tds[i].textContent.trim();
       if (t && t.length > 1) return t;
     }
     return null;
   }
 
-  // ── Checkboxen in Tabelle injizieren ──────────────────────
-  function injectCheckboxes() {
+  // ══════════════════════════════════════════════════════════
+  //  KERN-FIX: Checkbox-Injection — thead + tbody synchron
+  // ══════════════════════════════════════════════════════════
+
+  function patchTable() {
     var table = document.getElementById('fileTable');
     if (!table) return;
 
-    // Header-Checkbox
     var thead = table.querySelector('thead tr');
-    if (thead && !thead.querySelector('.md-cb-th')) {
+    var tbody = table.querySelector('tbody') || table.querySelector('#tableBody');
+    if (!thead || !tbody) return;
+
+    // ── Schritt 1: Prüfen ob tbody-Zeilen Checkboxen haben ──
+    var firstDataRow = tbody.querySelector('tr');
+    var tbodyHasCb   = firstDataRow && firstDataRow.querySelector('.md-cb-td');
+    var theadHasCb   = thead.querySelector('.md-cb-th');
+
+    // Wenn tbody keine Checkboxen hat (renderTable hat sie weggewischt),
+    // dann auch die thead-Checkbox entfernen um Sync herzustellen
+    if (theadHasCb && !tbodyHasCb && firstDataRow) {
+      theadHasCb.remove();
+      theadHasCb = null;
+    }
+
+    // ── Schritt 2: Header-Checkbox einfügen wenn nötig ──────
+    if (!thead.querySelector('.md-cb-th')) {
       var th = document.createElement('th');
       th.className = 'md-cb-th';
-      th.innerHTML = '<input type="checkbox" id="md-cb-all" title="Alle auswählen / abwählen">';
-      thead.insertBefore(th, thead.firstChild);
-      document.getElementById('md-cb-all').addEventListener('change', function () {
+      var headerCb = document.createElement('input');
+      headerCb.type = 'checkbox';
+      headerCb.id = 'md-cb-all';
+      headerCb.title = 'Alle auswählen / abwählen';
+      headerCb.addEventListener('change', function () {
         var checked = this.checked;
-        var visCbs  = getVisibleCheckboxes();
+        var visCbs = getVisibleCheckboxes();
         for (var i = 0; i < visCbs.length; i++) {
-          var cb   = visCbs[i];
-          var row  = cb.closest('tr');
+          var cb = visCbs[i];
           var info = cb._mdFileInfo;
           if (info) {
             cb.checked = checked;
-            toggleSelect(info, checked, row);
+            toggleSelect(info, checked, cb.closest('tr'));
           }
         }
       });
+      th.appendChild(headerCb);
+      thead.insertBefore(th, thead.firstChild);
     }
 
-    // Zeilen-Checkboxen
-    var rows = table.querySelectorAll('tbody tr');
+    // ── Schritt 3: Zeilen-Checkboxen einfügen ───────────────
+    var rows = tbody.querySelectorAll('tr');
     for (var i = 0; i < rows.length; i++) {
       var row = rows[i];
+
+      // Schon vorhanden → überspringen
       if (row.querySelector('.md-cb-td')) continue;
 
       var fileInfo = extractFileInfoFromRow(row);
-      if (!fileInfo) continue;
+      if (!fileInfo) {
+        // Trotzdem eine leere Zelle einfügen damit die Spalten stimmen!
+        var emptyTd = document.createElement('td');
+        emptyTd.className = 'md-cb-td';
+        row.insertBefore(emptyTd, row.firstChild);
+        continue;
+      }
 
       var td = document.createElement('td');
       td.className = 'md-cb-td';
 
       var cb = document.createElement('input');
-      cb.type      = 'checkbox';
+      cb.type = 'checkbox';
       cb.className = 'md-row-cb';
       cb._mdFileInfo = fileInfo;
       cb.setAttribute('data-fileid', fileInfo.fileId);
-
       cb.checked = !!selectedFiles[fileInfo.fileId];
       if (cb.checked) row.classList.add('md-selected');
 
-      cb.addEventListener('change', (function (capturedInfo, capturedRow) {
-        return function () { toggleSelect(capturedInfo, this.checked, capturedRow); };
+      cb.addEventListener('change', (function (info, r) {
+        return function () { toggleSelect(info, this.checked, r); };
       })(fileInfo, row));
 
       td.appendChild(cb);
       row.insertBefore(td, row.firstChild);
     }
+
     updateBar();
   }
 
-  // ── renderTable() hooking ─────────────────────────────────
+  // ── renderTable() Hook ────────────────────────────────────
   function hookRenderTable() {
     if (typeof window.renderTable !== 'function') return;
     if (window._mdRenderHooked) return;
@@ -339,176 +329,137 @@
 
     var origRender = window.renderTable;
     window.renderTable = function () {
+      // Vor dem Render: Header-Checkbox entfernen,
+      // damit sie beim Neuaufbau nicht zu Versatz führt
+      var oldTh = document.querySelector('#fileTable thead .md-cb-th');
+      if (oldTh) oldTh.remove();
+
       origRender.apply(this, arguments);
-      setTimeout(injectCheckboxes, 50);
+
+      // Nach dem Render: alles synchron neu injizieren
+      setTimeout(patchTable, 30);
     };
   }
 
-  // ── ZIP-Download Logik ────────────────────────────────────
+  // ── ZIP-Download ──────────────────────────────────────────
   function startZipDownload() {
     var files = [];
     for (var fid in selectedFiles) {
-      if (selectedFiles.hasOwnProperty(fid)) {
-        files.push(selectedFiles[fid]);
-      }
+      if (selectedFiles.hasOwnProperty(fid)) files.push(selectedFiles[fid]);
     }
     if (files.length === 0) return;
-
     isDownloading = true;
     document.getElementById('md-btn-dl').disabled = true;
-    console.log('[multi-download] Starte Download:', files.length, 'Dateien', JSON.stringify(files));
-
-    ensureJSZip(function () {
-      downloadFilesAsZip(files);
-    });
+    console.log('[multi-download] Start:', files.length, 'Dateien');
+    ensureJSZip(function () { downloadFilesAsZip(files); });
   }
 
   function downloadFilesAsZip(files) {
-    var zip       = new JSZip();
-    var total     = files.length;
-    var done      = 0;
-    var errors    = [];
-    var usedNames = {};
-
+    var zip = new JSZip(), total = files.length, done = 0, errors = [], usedNames = {};
     showProgress('Starte Downloads …', 0, '0 / ' + total);
 
     var chain = Promise.resolve();
     files.forEach(function (entry, i) {
       chain = chain.then(function () {
-        var fileId = entry.fileId;
-        var name   = entry.name || ('datei_' + i);
-
+        var fileId = entry.fileId, name = entry.name || ('datei_' + i);
         var safeName = name;
         if (usedNames[safeName]) {
-          var dot  = safeName.lastIndexOf('.');
-          var base = dot > 0 ? safeName.substring(0, dot) : safeName;
-          var ext  = dot > 0 ? safeName.substring(dot) : '';
-          var n = 2;
+          var dot = safeName.lastIndexOf('.'), base = dot > 0 ? safeName.substring(0, dot) : safeName;
+          var ext = dot > 0 ? safeName.substring(dot) : '', n = 2;
           while (usedNames[base + ' (' + n + ')' + ext]) n++;
           safeName = base + ' (' + n + ')' + ext;
         }
         usedNames[safeName] = true;
-
         showProgress('Lade: ' + name, (done / total) * 100, (done + 1) + ' / ' + total);
-        console.log('[multi-download] Lade', (done + 1) + '/' + total, name, 'id=' + fileId);
-
-        return fetchFileBlob(fileId)
-          .then(function (blob) {
-            zip.file(safeName, blob);
-            done++;
-            showProgress('Geladen: ' + name, (done / total) * 100, done + ' / ' + total);
-          })
-          .catch(function (err) {
-            done++;
-            errors.push(name + ': ' + (err.message || err));
-            console.error('[multi-download] Fehler bei', name, err);
-            showProgress('Fehler: ' + name, (done / total) * 100, done + ' / ' + total);
-          });
+        return fetchFileBlob(fileId).then(function (blob) {
+          zip.file(safeName, blob); done++;
+          showProgress('Geladen: ' + name, (done / total) * 100, done + ' / ' + total);
+        }).catch(function (err) {
+          done++; errors.push(name + ': ' + (err.message || err));
+          showProgress('Fehler: ' + name, (done / total) * 100, done + ' / ' + total);
+        });
       });
     });
 
     chain.then(function () {
-      if (Object.keys(zip.files).length === 0) {
-        finishDownload(false, 'Keine Dateien konnten geladen werden.');
-        return;
-      }
-      showProgress('Erstelle ZIP-Archiv …', 100, 'Bitte warten …');
-      return zip.generateAsync(
-        { type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 5 } },
-        function (meta) {
-          showProgress('Erstelle ZIP …', meta.percent, Math.round(meta.percent) + ' %');
-        }
-      );
-    })
-    .then(function (blob) {
+      if (Object.keys(zip.files).length === 0) { finishDownload(false, 'Keine Dateien geladen.'); return; }
+      showProgress('Erstelle ZIP …', 100, 'Bitte warten …');
+      return zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 5 } },
+        function (m) { showProgress('Erstelle ZIP …', m.percent, Math.round(m.percent) + ' %'); });
+    }).then(function (blob) {
       if (!blob) return;
       triggerDownload(blob, buildZipName());
       var msg = done + ' Datei(en) heruntergeladen.';
-      if (errors.length > 0) msg += ' ' + errors.length + ' Fehler:\n' + errors.join('\n');
+      if (errors.length) msg += ' ' + errors.length + ' Fehler:\n' + errors.join('\n');
       finishDownload(true, msg);
-    })
-    .catch(function (err) {
-      finishDownload(false, 'ZIP-Fehler: ' + (err.message || err));
-    });
+    }).catch(function (err) { finishDownload(false, 'ZIP-Fehler: ' + (err.message || err)); });
   }
 
   function fetchFileBlob(fileId) {
-    var token = window.accessToken;
     return fetch(PROXY_URL + '/core-fs/' + fileId + '/downloadurl?base=' + TC_BASE, {
-      headers: { 'Authorization': 'Bearer ' + token }
-    })
-    .then(function (r) {
-      if (!r.ok) throw new Error('Download-URL Fehler: HTTP ' + r.status);
+      headers: { 'Authorization': 'Bearer ' + window.accessToken }
+    }).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.json();
-    })
-    .then(function (data) {
-      if (!data.url) throw new Error('Keine Download-URL erhalten');
-      return fetch(data.url);
-    })
-    .then(function (r) {
-      if (!r.ok) throw new Error('Download Fehler: HTTP ' + r.status);
+    }).then(function (d) {
+      if (!d.url) throw new Error('Keine URL');
+      return fetch(d.url);
+    }).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.blob();
     });
   }
 
   function buildZipName() {
-    var d   = new Date();
-    var pad = function (n) { return n < 10 ? '0' + n : '' + n; };
-    var date = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
-    return 'SL-Explorer_' + (window.projectId || 'projekt') + '_' + date + '.zip';
+    var d = new Date(), p = function (n) { return n < 10 ? '0' + n : '' + n; };
+    return 'SL-Explorer_' + (window.projectId || 'projekt') + '_' +
+      d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + '.zip';
   }
 
-  // ── Download auslösen ─────────────────────────────────────
   function triggerDownload(blob, filename) {
     try {
       var url = URL.createObjectURL(blob);
-      var a   = document.createElement('a');
-      a.href     = url;
-      a.download = filename;
-      a.style.display = 'none';
-      document.body.appendChild(a);
-      a.click();
+      var a = document.createElement('a');
+      a.href = url; a.download = filename; a.style.display = 'none';
+      document.body.appendChild(a); a.click();
       setTimeout(function () { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
       return;
-    } catch (e) {
-      console.warn('[multi-download] <a download> fehlgeschlagen', e);
-    }
+    } catch (e) { console.warn('[multi-download] <a> fehlgeschlagen', e); }
     try {
-      var url2 = URL.createObjectURL(blob);
-      window.open(url2, '_blank');
-      setTimeout(function () { URL.revokeObjectURL(url2); }, 60000);
+      window.open(URL.createObjectURL(blob), '_blank');
     } catch (e2) {
-      console.error('[multi-download] Alle Download-Methoden fehlgeschlagen', e2);
-      alert('Download konnte nicht gestartet werden. Bitte Popup-Blocker prüfen.');
+      alert('Download konnte nicht gestartet werden.');
     }
   }
 
-  function finishDownload(success, msg) {
+  function finishDownload(ok, msg) {
     isDownloading = false;
     document.getElementById('md-btn-dl').disabled = false;
     hideProgress();
-    if (typeof window.setStatus === 'function') {
-      window.setStatus(success ? 'success' : 'danger', msg);
-    }
-    if (success) deselectAll();
+    if (typeof window.setStatus === 'function') window.setStatus(ok ? 'success' : 'danger', msg);
+    if (ok) deselectAll();
   }
 
-  // ── Initialisierung ───────────────────────────────────────
+  // ── Init ──────────────────────────────────────────────────
   function init() {
     injectStyles();
     createDownloadBar();
     createProgress();
     hookRenderTable();
-    injectCheckboxes();
 
+    // Initiales Patching (Tabelle könnte schon da sein)
+    patchTable();
+
+    // MutationObserver als Sicherheitsnetz
     var tbody = document.getElementById('tableBody');
     if (tbody) {
       new MutationObserver(function () {
-        setTimeout(injectCheckboxes, 60);
+        // Kurz warten bis renderTable() fertig ist
+        setTimeout(patchTable, 40);
       }).observe(tbody, { childList: true });
     }
 
-    console.log('[multi-download] Modul v1.1 geladen');
+    console.log('[multi-download] Modul v1.2 geladen');
   }
 
   if (document.readyState === 'loading') {
