@@ -203,7 +203,7 @@
       extFrame.innerHTML = '';
 
       if (kind === 'pdf') {
-        var proxyUrl = toPdfViewUrl(signedUrl);
+        var proxyUrl = toPdfViewUrl(signedUrl) + '#zoom=page-fit';
         var iframe = extDoc.createElement('iframe');
         iframe.src = proxyUrl;
         iframe.setAttribute('allow', 'fullscreen');
@@ -236,10 +236,10 @@
     doc.write('<!DOCTYPE html><html lang="de"><head><meta charset="UTF-8"><title>S+L Viewer</title><style>' +
       '*{box-sizing:border-box;margin:0;padding:0}' +
       'body{background:#1a1d27;color:#e4e8f0;font-family:"DM Sans","Segoe UI",sans-serif;height:100vh;display:flex;flex-direction:column;overflow:hidden}' +
-      '.toolbar{display:flex;align-items:center;gap:8px;padding:8px 12px;background:#0f1117;border-bottom:1px solid #2a2d3e;flex-shrink:0}' +
-      '.title{flex:1;font-size:13px;font-weight:600;color:#e4e8f0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-left:8px}' +
-      '.subtitle{font-size:10px;color:#7a8199;font-weight:400;margin-left:8px;flex-shrink:0}' +
-      'button{background:none;border:1px solid #2a2d3e;border-radius:4px;color:#7a8199;cursor:pointer;padding:4px 10px;font-size:12px;font-family:inherit;display:inline-flex;align-items:center;gap:4px;transition:all .15s}' +
+      '.toolbar{display:flex;align-items:center;gap:8px;padding:4px 12px;background:#0f1117;border-bottom:1px solid #2a2d3e;flex-shrink:0;height:36px}' +
+      '.title{flex:1;font-size:12px;font-weight:600;color:#e4e8f0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-left:8px}' +
+      '.subtitle{font-size:9px;color:#7a8199;font-weight:400;margin-left:8px;flex-shrink:0}' +
+      'button{background:none;border:1px solid #2a2d3e;border-radius:4px;color:#7a8199;cursor:pointer;padding:2px 8px;font-size:11px;font-family:inherit;display:inline-flex;align-items:center;gap:4px;transition:all .15s}' +
       'button:hover{border-color:#00c2ff;color:#00c2ff;background:#1e2235}' +
       'button svg{width:14px;height:14px;fill:currentColor}' +
       '#extFrame{flex:1;overflow:hidden;background:#525659}' +
@@ -251,7 +251,7 @@
       '@keyframes spin{to{transform:rotate(360deg)}}' +
       '</style></head><body>' +
       '<div class="toolbar">' +
-        '<svg width="20" height="20" viewBox="0 0 24 24" fill="#00c2ff"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6z"/></svg>' +
+        '<svg width="16" height="16" viewBox="0 0 24 24" fill="#00c2ff"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6z"/></svg>' +
         '<div class="title" id="extTitle">Warte auf Auswahl\u2026</div>' +
         '<span class="subtitle">' + escHtml(subtitle) + '</span>' +
         '<button id="extFullscreen"><svg viewBox="0 0 24 24"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg> Vollbild</button>' +
@@ -300,13 +300,10 @@
   }, 500);
 
   // ─── closePreview überschreiben ───
-  // Wenn User auf X klickt: Inline verbergen, _inlineHidden merken
   var _origClosePreview = window.closePreview;
   window.closePreview = function() {
-    // Merken dass User den Inline-Viewer bewusst geschlossen hat
     _inlineHidden = true;
 
-    // Auge-Highlighting entfernen (nur wenn keine externen Fenster)
     if (!hasExternalWindow()) {
       _currentFile = null;
       _currentIdx = -1;
@@ -314,12 +311,10 @@
       for (var i = 0; i < allBtns.length; i++) allBtns[i].classList.remove('active');
     }
 
-    // Nativ-Fenster: Platzhalter (nur wenn kein externes Fenster aktiv)
     if (_extNative && !_extNative.closed && !hasExternalWindow()) {
       showExtPlaceholder(_extNative);
     }
 
-    // Original closePreview aufrufen (Panel zuklappen)
     if (typeof _origClosePreview === 'function') _origClosePreview();
   };
 
@@ -334,10 +329,8 @@
 
     if (!_btnInjected) injectDetachButtons();
 
-    // ═══ IMMER Auge-Highlighting aktualisieren ═══
     updateEyeHighlight(idx);
 
-    // ═══ Externe Fenster aktualisieren (falls offen) ═══
     if (_extTrimble && !_extTrimble.closed) {
       loadTrimbleInExternal(file);
     }
@@ -345,16 +338,12 @@
       loadNativeInExternal(file);
     }
 
-    // ═══ Eingebetteten Viewer: NUR öffnen wenn nicht bewusst verborgen ═══
     if (hasExternalWindow() && _inlineHidden) {
-      // Externes Fenster aktiv UND Inline verborgen → Inline NICHT öffnen
-      // Aber Buttons aktualisieren
       setTimeout(function() { updateButtons(); }, 100);
       return;
     }
 
-    // Inline öffnen (User hat ihn nicht geschlossen, oder es gibt kein externes Fenster)
-    _inlineHidden = false; // Beim nächsten Auge-Klick ohne externes Fenster: wieder öffnen
+    _inlineHidden = false;
     if (typeof _origOpenPreview === 'function') {
       _origOpenPreview(idx);
     }
