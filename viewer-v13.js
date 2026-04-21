@@ -13,10 +13,35 @@
   var _extNative = null;
   var _inlineHidden = false; // User hat Inline-Viewer bewusst geschlossen
 
-  function getDownloadUrl(fileId) {
+  // ─── Token-Refresh bei abgelaufenem Token ───
+  function refreshToken() {
+    return new Promise(function(resolve) {
+      if (typeof workspaceAPI !== 'undefined' && workspaceAPI) {
+        var resolved = false;
+        workspaceAPI.requestPermission(function(token) {
+          if (resolved) return;
+          resolved = true;
+          if (token) { accessToken = token; console.log('[Viewer] Token erneuert'); resolve(true); }
+          else if (typeof workspaceAPI.getAccessToken === 'function') {
+            workspaceAPI.getAccessToken(function(t) { if (t) accessToken = t; resolve(!!t); });
+          } else { resolve(false); }
+        });
+        setTimeout(function() { if (!resolved) { resolved = true; resolve(false); } }, 8000);
+      } else { resolve(false); }
+    });
+  }
+
+  function getDownloadUrl(fileId, _isRetry) {
     return fetch(PROXY_URL + '/core-fs/' + fileId + '/downloadurl?base=' + TC_BASE, {
       headers: { 'Authorization': 'Bearer ' + accessToken },
     }).then(function(r) {
+      if ((r.status === 401 || r.status === 403) && !_isRetry) {
+        console.log('[Viewer] Token abgelaufen (' + r.status + '), erneuere...');
+        return refreshToken().then(function(ok) {
+          if (ok) return getDownloadUrl(fileId, true);
+          throw new Error('Token konnte nicht erneuert werden');
+        });
+      }
       if (!r.ok) throw new Error('Download-URL Fehler: ' + r.status);
       return r.json();
     }).then(function(data) {
