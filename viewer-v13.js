@@ -1,721 +1,369 @@
 // ═══════════════════════════════════════════════════════════════
-//  S+L Explorer — Volltextsuche v10
-//  Indexiert nur sichtbare Dateien (basierend auf DOM-Sichtbarkeit)
+//  S+L Explorer — Enhanced Viewer v13
+//  Fix: Eingebetteter Viewer kann verborgen werden
 // ═══════════════════════════════════════════════════════════════
 (function() {
 
   var PROXY_URL = 'https://slproxy.schoknechtthomas.workers.dev';
-  var PSET_REGION = 'eu-west-1';
-  var DEF_ID = 'sl-pdf-fulltext';
   var TC_BASE = 'https://app21.connect.trimble.com';
 
-  var PDFJS_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.mjs';
-  var PDFJS_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.mjs';
-  var CMAP_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/cmaps/';
-  var FONT_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/standard_fonts/';
-
-  var _pdfjsLib = null;
-  var _ftsCache = {};
-  var _indexing = false;
-  var _abort = null;
-  var _progress = { done: 0, total: 0, cached: 0, extracted: 0, errors: 0 };
-  var _libId = null;
-  var _defReady = false;
-  var _indexedFileIds = {};
-  var _ftsSearchVisible = false;
-
-  function loadPdfJs() {
-    if (_pdfjsLib) return Promise.resolve(_pdfjsLib);
-    return import(PDFJS_URL).then(function(lib) {
-      lib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER;
-      _pdfjsLib = lib;
-      return lib;
-    });
-  }
-
-  function loadPdfDocument(buf) {
-    return _pdfjsLib.getDocument({
-      data: buf, cMapUrl: CMAP_URL, cMapPacked: true, standardFontDataUrl: FONT_URL,
-    }).promise;
-  }
-
-  function psetFetch(path, method, body) {
-    var opts = {
-      method: method || 'GET',
-      headers: { 'Authorization': 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
-    };
-    if (body) opts.body = JSON.stringify(body);
-    return fetch(PROXY_URL + '/pset/' + PSET_REGION + path, opts).then(function(r) {
-      return r.text().then(function(t) {
-        var data; try { data = JSON.parse(t); } catch(e) { data = t; }
-        return { status: r.status, ok: r.ok, data: data };
-      });
-    });
-  }
-
-  function ensureDefinition() {
-    if (_defReady) return Promise.resolve(true);
-    _libId = 'tcproject:prod:' + projectId;
-    return psetFetch('/libs/' + _libId + '/defs/' + DEF_ID, 'GET').then(function(r) {
-      if (r.ok) { _defReady = true; return true; }
-      return psetFetch('/libs/' + _libId + '/defs', 'POST', {
-        id: DEF_ID, name: 'S+L PDF Volltext-Cache',
-        schema: { open: true, props: {
-          'fulltext': { type: 'string' },
-          'page_count': { type: 'integer' },
-          'extracted_at': { type: 'string', format: 'date-time' },
-        }}
-      }).then(function(r2) {
-        if (r2.ok || r2.status === 201) { _defReady = true; return true; }
-        return false;
-      });
-    });
-  }
-
-  function readPSetCache(fileId) {
-    var link = 'frn:tcfile:' + fileId;
-    return psetFetch('/psets/' + encodeURIComponent(link) + '/' + encodeURIComponent(_libId) + '/' + DEF_ID, 'GET')
-      .then(function(r) { return (r.ok && r.data && r.data.props) ? r.data.props : null; })
-      .catch(function() { return null; });
-  }
-
-  function writePSetCache(fileId, data) {
-    var link = 'frn:tcfile:' + fileId;
-    return psetFetch('/psets/' + encodeURIComponent(link) + '/' + encodeURIComponent(_libId) + '/' + DEF_ID, 'PUT', { props: data })
-      .then(function(r) { return r.ok; })
-      .catch(function() { return false; });
-  }
+  var _currentFile = null;
+  var _currentIdx = -1;
+  var _extTrimble = null;
+  var _extNative = null;
+  var _inlineHidden = false; // User hat Inline-Viewer bewusst geschlossen
 
   function getDownloadUrl(fileId) {
     return fetch(PROXY_URL + '/core-fs/' + fileId + '/downloadurl?base=' + TC_BASE, {
       headers: { 'Authorization': 'Bearer ' + accessToken },
     }).then(function(r) {
-      if (!r.ok) throw new Error('DL-URL ' + r.status);
+      if (!r.ok) throw new Error('Download-URL Fehler: ' + r.status);
       return r.json();
-    }).then(function(d) { return d.url; });
+    }).then(function(data) {
+      if (!data || !data.url) throw new Error('Keine Download-URL');
+      return data.url;
+    });
   }
 
-  function extractText(fileId) {
-    return getDownloadUrl(fileId).then(function(url) {
-      return fetch(url);
-    }).then(function(r) {
-      if (!r.ok) throw new Error('PDF ' + r.status);
-      return r.arrayBuffer();
-    }).then(function(buf) {
-      return loadPdfDocument(buf);
-    }).then(function(pdf) {
-      var promises = [];
-      for (var i = 1; i <= pdf.numPages; i++) {
-        promises.push(pdf.getPage(i).then(function(p) {
-          return p.getTextContent().then(function(c) {
-            return c.items.map(function(it) { return it.str; }).join(' ');
-          });
-        }));
-      }
-      return Promise.all(promises).then(function(texts) {
-        return { text: texts.join('\n\n'), pages: pdf.numPages };
-      });
-    });
+  function toPdfViewUrl(signedUrl) {
+    return PROXY_URL + '/pdf-view?url=' + encodeURIComponent(signedUrl);
+  }
+
+  function getFileKind(name) {
+    var lower = (name || '').toLowerCase();
+    if (lower.endsWith('.pdf')) return 'pdf';
+    if (/\.(png|jpg|jpeg|gif|webp|bmp|svg)$/.test(lower)) return 'image';
+    return 'other';
+  }
+
+  function hasExternalWindow() {
+    return (_extTrimble && !_extTrimble.closed) || (_extNative && !_extNative.closed);
   }
 
   // ═══════════════════════════════════════════════════════════════
-  //  SICHTBARE PDFs ermitteln — basierend auf DOM
-  //  Die Filterung im Explorer passiert nur visuell (tr.style.display)
-  //  allFiles wird NICHT reduziert, deshalb müssen wir die sichtbaren
-  //  Tabellenzeilen auslesen und deren Index in allFiles ermitteln.
+  //  AUGE-HIGHLIGHTING
   // ═══════════════════════════════════════════════════════════════
-  function getVisiblePdfFiles() {
-    var visibleFiles = [];
-    var rows = document.querySelectorAll('#tableBody tr');
-    rows.forEach(function(tr) {
-      if (tr.style.display === 'none') return;
-
-      // Index aus den Buttons in der Zeile extrahieren (onclick="openFile(X)")
-      // oder aus dem prev-btn ID (prev-btn-X)
-      var prevBtn = tr.querySelector('.prev-btn');
-      if (!prevBtn) return;
-      var btnId = prevBtn.id || '';
-      var match = btnId.match(/prev-btn-(\d+)/);
-      if (!match) return;
-      var idx = parseInt(match[1], 10);
-      if (isNaN(idx) || idx < 0 || idx >= allFiles.length) return;
-
-      var file = allFiles[idx];
-      if (!file) return;
-      if (!file.name || !file.name.toLowerCase().endsWith('.pdf')) return;
-
-      visibleFiles.push(file);
-    });
-    return visibleFiles;
-  }
-
-  // ─── Indexierung ───
-  function indexOne(file) {
-    var fileId = getFileId(file);
-    if (!fileId) return Promise.resolve();
-
-    if (_ftsCache[fileId] && _ftsCache[fileId].text) {
-      _progress.cached++;
-      return Promise.resolve();
-    }
-
-    return readPSetCache(fileId).then(function(cached) {
-      if (cached && cached.fulltext) {
-        _ftsCache[fileId] = { text: cached.fulltext, pages: cached.page_count || 0, src: 'pset' };
-        _progress.cached++;
-        return;
-      }
-      return extractText(fileId).then(function(result) {
-        _ftsCache[fileId] = { text: result.text, pages: result.pages, src: 'extracted' };
-        _progress.extracted++;
-        return writePSetCache(fileId, {
-          fulltext: result.text.substring(0, 1000000),
-          page_count: result.pages,
-          extracted_at: new Date().toISOString(),
-        });
-      });
-    }).catch(function(e) {
-      console.warn('[FTS] Fehler:', file.name, e.message);
-      _ftsCache[fileId] = { text: '', pages: 0, src: 'error' };
-      _progress.errors++;
-    });
-  }
-
-  function startIndexing() {
-    if (_indexing) return;
-
-    // Sichtbare PDFs aus dem DOM ermitteln
-    var pdfFiles = getVisiblePdfFiles();
-
-    console.log('[FTS] Sichtbare PDFs:', pdfFiles.length, '(von', allFiles.length, 'gesamt)');
-
-    if (pdfFiles.length === 0) {
-      updateFtsButton('error', 'Keine PDFs in der aktuellen Ansicht');
-      return;
-    }
-
-    // Prüfen ob alle schon im lokalen Cache
-    var allCached = pdfFiles.every(function(f) {
-      var id = getFileId(f);
-      return id && _ftsCache[id] && _ftsCache[id].text;
-    });
-
-    if (allCached) {
-      _indexedFileIds = {};
-      pdfFiles.forEach(function(f) { var id = getFileId(f); if (id) _indexedFileIds[id] = true; });
-      updateFtsButton('ready', pdfFiles.length + ' PDFs aus Cache');
-      showFtsSearch();
-      return;
-    }
-
-    _indexing = true;
-    _abort = { stopped: false };
-    updateFtsButton('indexing', '0/' + pdfFiles.length);
-
-    loadPdfJs().then(function(lib) {
-      if (!lib) { _indexing = false; updateFtsButton('error', 'PDF.js Fehler'); return; }
-      return ensureDefinition();
-    }).then(function(ok) {
-      if (!ok) { _indexing = false; updateFtsButton('error', 'Cache-Fehler'); return; }
-
-      _progress = { done: 0, total: pdfFiles.length, cached: 0, extracted: 0, errors: 0 };
-
-      var i = 0;
-      var BATCH = 3;
-
-      function nextBatch() {
-        if (_abort.stopped || i >= pdfFiles.length) {
-          _indexing = false;
-          _indexedFileIds = {};
-          pdfFiles.forEach(function(f) { var id = getFileId(f); if (id) _indexedFileIds[id] = true; });
-          var msg = _progress.extracted + ' neu, ' + _progress.cached + ' Cache (' + pdfFiles.length + ' PDFs)';
-          updateFtsButton('ready', msg);
-          showFtsSearch();
-          console.log('[FTS] Fertig:', _progress);
-          return;
-        }
-        var batch = pdfFiles.slice(i, i + BATCH);
-        i += BATCH;
-        Promise.all(batch.map(function(f) {
-          return indexOne(f).then(function() { _progress.done++; });
-        })).then(function() {
-          updateFtsButton('indexing', _progress.done + '/' + _progress.total);
-          nextBatch();
-        });
-      }
-      nextBatch();
-    });
-  }
-
-  // ─── Suche ───
-  function ftsSearch(query) {
-    if (!query || query.length < 2) return [];
-    var terms = query.toLowerCase().split(/\s+/).filter(function(t) { return t.length >= 2; });
-    var results = [];
-
-    for (var fi = 0; fi < allFiles.length; fi++) {
-      var file = allFiles[fi];
-      var fileId = getFileId(file);
-      if (!fileId) continue;
-      if (!_indexedFileIds[fileId]) continue;
-
-      var entry = _ftsCache[fileId];
-      if (!entry || !entry.text) continue;
-
-      var content = entry.text.toLowerCase();
-      var name = (file.name || '').toLowerCase();
-      var score = 0;
-      var snippets = [];
-
-      for (var ti = 0; ti < terms.length; ti++) {
-        var term = terms[ti];
-        if (content.indexOf(term) >= 0) {
-          var occ = content.split(term).length - 1;
-          score += 5 * Math.min(occ, 10);
-          var ci = content.indexOf(term);
-          var s0 = Math.max(0, ci - 50);
-          var s1 = Math.min(content.length, ci + term.length + 50);
-          if (snippets.length < 3) {
-            snippets.push((s0 > 0 ? '...' : '') + content.substring(s0, s1) + (s1 < content.length ? '...' : ''));
-          }
-        }
-        if (name.indexOf(term) >= 0) score += 3;
-      }
-
-      if (score > 0) {
-        results.push({ file: file, fileId: fileId, score: score, snippets: snippets, pages: entry.pages });
-      }
-    }
-
-    results.sort(function(a, b) { return b.score - a.score; });
-    return results;
-  }
-
-  // ─── Ergebnisse rendern ───
-  function renderFtsResults(results, query) {
-    var el;
-    el = document.getElementById('stateLoading'); if (el) el.style.display = 'none';
-    el = document.getElementById('stateError'); if (el) el.style.display = 'none';
-    el = document.getElementById('stateEmpty'); if (el) el.style.display = 'none';
-    el = document.getElementById('tableWrap'); if (el) el.style.display = 'block';
-    el = document.querySelector('.content-split'); if (el) el.style.display = 'flex';
-
-    var tbody = document.getElementById('tableBody');
-    if (!tbody) return;
-    tbody.innerHTML = '';
-
-    if (results.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:40px;color:#7a8199">Keine Treffer f\u00fcr "' + escHtml(query) + '" im PDF-Inhalt</td></tr>';
-      setStatus('ok', '0 Volltexttreffer');
-      return;
-    }
-
-    var qw = query.toLowerCase().split(/\s+/).filter(function(t) { return t.length >= 2; });
-
-    for (var ri = 0; ri < results.length; ri++) {
-      var r = results[ri];
-      var f = r.file;
-      var name = f.name || '-';
-      var modBy = getModifiedBy(f);
-      var modAt = formatDate(getModifiedAt(f));
-      var ver = f._versionCount || 1;
-      var path = f._path || '/';
-      var init = modBy.split(/[\s.@]+/).map(function(n){return n[0];}).filter(Boolean).join('').toUpperCase().slice(0,2) || '?';
-      var idx = allFiles.indexOf(f);
-      if (idx < 0) { allFiles.push(f); idx = allFiles.length - 1; }
-
-      var badges = '<span style="display:inline-block;font-size:9px;padding:1px 5px;border-radius:8px;background:#22d3a0;color:#000;font-weight:600;margin-left:4px">Inhalt</span>';
-      if (r.pages > 0) badges += '<span style="display:inline-block;font-size:9px;padding:1px 5px;border-radius:8px;background:#1a1d27;color:#7a8199;margin-left:4px">' + r.pages + 'p</span>';
-
-      var snippetHtml = '';
-      if (r.snippets.length > 0) {
-        var combined = r.snippets.join(' \u00b7 ');
-        var shown = escHtml(combined);
-        for (var qi = 0; qi < qw.length; qi++) {
-          shown = shown.replace(new RegExp('(' + qw[qi].replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'gi'),
-            '<mark style="background:#f59e0b;color:#000;padding:0 2px;border-radius:2px">$1</mark>');
-        }
-        snippetHtml = '<div style="font-size:10px;color:#7a8199;margin-top:3px;max-width:600px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-style:italic">' + shown + '</div>';
-      }
-
-      var tr = document.createElement('tr');
-      tr.style.borderBottom = '1px solid #2a2d3e';
-      tr.innerHTML =
-        '<td style="padding:10px 12px"><div style="display:flex;flex-direction:column;gap:2px"><div style="display:flex;align-items:center;gap:8px">' +
-          getFileIconHtml(name) +
-          '<span onclick="openFile(' + idx + ')" style="color:#00c2ff;font-family:var(--font);font-size:12.5px;font-weight:500;cursor:pointer">' + escHtml(name) + '</span>' +
-          badges + '</div>' + snippetHtml + '</div></td>' +
-        '<td style="padding:10px 12px"><div class="user-chip"><div class="avatar">' + escHtml(init) + '</div><span>' + escHtml(modBy) + '</span></div></td>' +
-        '<td style="padding:10px 12px;font-family:var(--font);font-size:11px;color:#7a8199;white-space:nowrap">' + modAt + '</td>' +
-        '<td style="padding:10px 12px;text-align:center"><span class="version-badge" onclick="openVersionModal(' + idx + ',\'' + escHtml(name).replace(/'/g,"\\'") + '\')">' + ver + '</span></td>' +
-        '<td style="padding:10px 12px;font-family:var(--font);font-size:11px;color:#7a8199">' + escHtml(path) + '</td>' +
-        '<td class="actions-td" style="text-align:center;padding:10px 12px"><div style="display:inline-flex;gap:4px">' +
-          '<button class="prev-btn" id="prev-btn-' + idx + '" onclick="openPreview(' + idx + ')" title="Vorschau"><svg viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg></button>' +
-          '<button class="dl-btn" onclick="downloadFile(' + idx + ')" title="Download"><svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M5 20h14v-2H5v2zm7-14v8.17l-2.59-2.58L8 13l4 4 4-4-1.41-1.41L13 14.17V6h-1z"/></svg></button>' +
-        '</div></td>';
-      tbody.appendChild(tr);
-    }
-
-    setStatus('ok', results.length + ' Volltexttreffer');
+  function updateEyeHighlight(idx) {
+    var allBtns = document.querySelectorAll('.prev-btn');
+    for (var i = 0; i < allBtns.length; i++) allBtns[i].classList.remove('active');
+    var activeBtn = document.getElementById('prev-btn-' + idx);
+    if (activeBtn) activeBtn.classList.add('active');
   }
 
   // ═══════════════════════════════════════════════════════════════
-  //  UI
+  //  CSS
   // ═══════════════════════════════════════════════════════════════
-  function injectFtsUI() {
-    if (document.getElementById('sl-fts-wrap')) return;
-    var toolbar = document.getElementById('toolbar');
-    if (!toolbar) return;
+  function injectStyles() {
+    if (document.getElementById('sl-viewer-styles')) return;
+    var css =
+      '.sl-detach-wrap{display:flex;align-items:center;gap:4px;flex-shrink:0}' +
+      '.sl-detach-hint{font-size:10px;color:#7a8199;white-space:nowrap;flex-shrink:0}' +
+      '.sl-dbtn{background:none;border:1px solid #2a2d3e;border-radius:4px;color:#7a8199;cursor:pointer;padding:3px 7px;font-size:10px;font-family:var(--font-ui,sans-serif);display:inline-flex;align-items:center;gap:3px;transition:all .15s;white-space:nowrap;flex-shrink:0}' +
+      '.sl-dbtn:hover{border-color:#00c2ff;color:#00c2ff;background:#1e2235}' +
+      '.sl-dbtn.active{background:#005f8a;color:#fff;border-color:#00c2ff}' +
+      '.sl-dbtn svg{width:11px;height:11px;fill:currentColor}';
+    var style = document.createElement('style');
+    style.id = 'sl-viewer-styles';
+    style.textContent = css;
+    document.head.appendChild(style);
+  }
 
-    var css = document.createElement('style');
-    css.textContent =
-      '#sl-fts-wrap{display:flex;align-items:center;gap:6px;flex-shrink:0}' +
-      '#sl-fts-btn{display:flex;align-items:center;gap:6px;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:6px 12px;font-size:12px;font-family:var(--font-ui);color:var(--text);cursor:pointer;transition:all .15s;white-space:nowrap}' +
-      '#sl-fts-btn:hover{border-color:var(--accent);color:var(--accent)}' +
-      '#sl-fts-btn.indexing{border-color:#f59e0b;color:#f59e0b;cursor:wait}' +
-      '#sl-fts-btn.ready{border-color:#22d3a0;color:#22d3a0}' +
-      '#sl-fts-btn.error{border-color:#ef4444;color:#ef4444}' +
-      '#sl-fts-btn svg{width:14px;height:14px;fill:currentColor}' +
-      '#sl-fts-status{font-family:var(--font);font-size:10px;color:#7a8199;white-space:nowrap}' +
-      '#sl-fts-search-wrap{display:none;position:relative;flex-shrink:1;min-width:140px;max-width:280px}' +
-      '#sl-fts-search-wrap.visible{display:block}' +
-      '#sl-fts-search{width:100%;background:var(--bg);border:1px solid #22d3a0;border-radius:6px;padding:6px 10px 6px 28px;font-size:12px;color:var(--text);font-family:var(--font-ui);outline:none;transition:border-color .2s}' +
-      '#sl-fts-search:focus{border-color:#00c2ff}' +
-      '#sl-fts-search::placeholder{color:#7a8199}' +
-      '#sl-fts-search-wrap svg{position:absolute;left:8px;top:50%;transform:translateY(-50%);width:13px;height:13px;fill:#22d3a0}' +
-      '@keyframes sl-spin{to{transform:rotate(360deg)}}';
-    document.head.appendChild(css);
+  // ═══════════════════════════════════════════════════════════════
+  //  Buttons in Preview-Toolbar
+  // ═══════════════════════════════════════════════════════════════
+  function injectDetachButtons() {
+    if (document.getElementById('sl-detach-wrap')) return;
+    var previewHeader = document.querySelector('.preview-header');
+    if (!previewHeader) return;
+
+    injectStyles();
 
     var wrap = document.createElement('div');
-    wrap.id = 'sl-fts-wrap';
+    wrap.className = 'sl-detach-wrap';
+    wrap.id = 'sl-detach-wrap';
 
-    var btn = document.createElement('button');
-    btn.id = 'sl-fts-btn';
-    btn.title = 'Aktuell angezeigte PDFs f\u00fcr Volltextsuche indexieren';
-    btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>Volltextsuche';
-    btn.onclick = function() { startIndexing(); };
-    wrap.appendChild(btn);
+    var hint = document.createElement('span');
+    hint.className = 'sl-detach-hint';
+    hint.textContent = 'Abkoppeln mit:';
+    wrap.appendChild(hint);
 
-    var status = document.createElement('span');
-    status.id = 'sl-fts-status';
-    wrap.appendChild(status);
+    var btnT = document.createElement('button');
+    btnT.className = 'sl-dbtn';
+    btnT.id = 'sl-detach-trimble';
+    btnT.title = 'Externes Fenster mit Trimble Viewer';
+    btnT.innerHTML = '<svg viewBox="0 0 24 24"><path d="M19 4H5c-1.11 0-2 .9-2 2v12c0 1.1.89 2 2 2h4v-2H5V8h14v10h-4v2h4c1.1 0 2-.9 2-2V6c0-1.1-.89-2-2-2zm-7 6l-4 4h3v6h2v-6h3l-4-4z"/></svg><span id="sl-label-trimble">Trimble</span>';
+    btnT.onclick = function() { toggleExtTrimble(); };
+    wrap.appendChild(btnT);
 
-    var searchWrap = document.createElement('div');
-    searchWrap.id = 'sl-fts-search-wrap';
-    searchWrap.innerHTML = '<svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>';
-    var searchInput = document.createElement('input');
-    searchInput.type = 'text';
-    searchInput.id = 'sl-fts-search';
-    searchInput.placeholder = 'PDF-Inhalt durchsuchen\u2026';
-    searchInput.addEventListener('input', function() {
-      var query = searchInput.value.trim();
-      if (query.length >= 2) {
-        var results = ftsSearch(query);
-        console.log('[FTS] Suche "' + query + '": ' + results.length + ' Treffer');
-        renderFtsResults(results, query);
-      } else if (query.length < 2) {
-        restoreNormalTable();
-      }
-    });
-    searchWrap.appendChild(searchInput);
-    wrap.appendChild(searchWrap);
+    var btnN = document.createElement('button');
+    btnN.className = 'sl-dbtn';
+    btnN.id = 'sl-detach-native';
+    btnN.title = 'Externes Fenster mit nativem PDF-Viewer (sch\u00e4rfer, mit Strg+F)';
+    btnN.innerHTML = '<svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6zm-1 1.5L18.5 9H13V3.5zM8 13h8v1H8v-1zm0 3h8v1H8v-1zm0-6h4v1H8v-1z"/></svg><span id="sl-label-native">Nativ</span>';
+    btnN.onclick = function() { toggleExtNative(); };
+    wrap.appendChild(btnN);
 
-    var statPill = toolbar.querySelector('.stat-pill');
-    if (statPill) toolbar.insertBefore(wrap, statPill);
-    else toolbar.appendChild(wrap);
+    var closeBtn = previewHeader.querySelector('.preview-close');
+    if (closeBtn) previewHeader.insertBefore(wrap, closeBtn);
+    else previewHeader.appendChild(wrap);
   }
 
-  function updateFtsButton(state, msg) {
-    var btn = document.getElementById('sl-fts-btn');
-    var status = document.getElementById('sl-fts-status');
-    if (!btn) return;
-    btn.className = '';
-    if (state === 'indexing') {
-      btn.className = 'indexing';
-      btn.innerHTML = '<svg viewBox="0 0 24 24" style="animation:sl-spin .7s linear infinite"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0020 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74A7.93 7.93 0 004 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg>Indexiere\u2026';
-    } else if (state === 'ready') {
-      btn.className = 'ready';
-      btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>Volltext \u2713';
-    } else if (state === 'error') {
-      btn.className = 'error';
-      btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>Fehler';
-    } else {
-      btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>Volltextsuche';
+  function updateButtons() {
+    var btnT = document.getElementById('sl-detach-trimble');
+    var btnN = document.getElementById('sl-detach-native');
+    var lblT = document.getElementById('sl-label-trimble');
+    var lblN = document.getElementById('sl-label-native');
+    if (btnT) {
+      if (_extTrimble && !_extTrimble.closed) { btnT.classList.add('active'); if (lblT) lblT.textContent = 'Trimble \u2713'; }
+      else { btnT.classList.remove('active'); if (lblT) lblT.textContent = 'Trimble'; }
     }
-    if (status) status.textContent = msg || '';
-  }
-
-  function showFtsSearch() {
-    var wrap = document.getElementById('sl-fts-search-wrap');
-    if (wrap) { wrap.classList.add('visible'); _ftsSearchVisible = true; }
-  }
-
-  function hideFtsSearch() {
-    var wrap = document.getElementById('sl-fts-search-wrap');
-    if (wrap) { wrap.classList.remove('visible'); _ftsSearchVisible = false; }
-    var input = document.getElementById('sl-fts-search');
-    if (input) input.value = '';
-  }
-
-  function restoreNormalTable() {
-    searchResultFiles = null;
-    allFiles = baseFiles.slice();
-    if (typeof searchAllAbortController !== 'undefined' && searchAllAbortController) {
-      searchAllAbortController.abort(); searchAllAbortController = null;
+    if (btnN) {
+      if (_extNative && !_extNative.closed) { btnN.classList.add('active'); if (lblN) lblN.textContent = 'Nativ \u2713'; }
+      else { btnN.classList.remove('active'); if (lblN) lblN.textContent = 'Nativ'; }
     }
-    renderTable();
   }
 
   // ═══════════════════════════════════════════════════════════════
-  //  DATEIÄNDERUNGS-ERKENNUNG
+  //  TRIMBLE VIEWER — EXTERNES FENSTER
   // ═══════════════════════════════════════════════════════════════
-  var _lastBaseFilesSignature = null;
-
-  function getBaseFilesSignature() {
-    return baseFiles.map(function(f) { return getFileId(f); }).sort().join(',');
+  function toggleExtTrimble() {
+    if (_extTrimble && !_extTrimble.closed) {
+      _extTrimble.close(); _extTrimble = null; updateButtons(); return;
+    }
+    openExtTrimble();
   }
 
-  function checkForFileChanges() {
-    var sig = getBaseFilesSignature();
-    if (_lastBaseFilesSignature !== null && sig !== _lastBaseFilesSignature) {
-      hideFtsSearch();
-      _indexedFileIds = {};
-      updateFtsButton('default', '');
-    }
-    _lastBaseFilesSignature = sig;
+  function openExtTrimble() {
+    var extWin = window.open('about:blank', 'sl-viewer-trimble', 'width=1200,height=900,menubar=no,toolbar=no,location=no,status=no,resizable=yes,scrollbars=yes');
+    if (!extWin) { alert('Popup blockiert!'); return; }
+    _extTrimble = extWin;
+    if (_currentFile) loadTrimbleInExternal(_currentFile);
+    watchClose(function() { return _extTrimble; }, function() { _extTrimble = null; updateButtons(); });
+    updateButtons();
   }
 
-  setInterval(checkForFileChanges, 500);
-
-  // ═══════════════════════════════════════════════════════════════
-  //  INIT
-  // ═══════════════════════════════════════════════════════════════
-  function init() {
-    var toolbar = document.getElementById('toolbar');
-    if (!toolbar) return;
-    injectFtsUI();
-
-    var searchInput = document.getElementById('searchInput');
-    if (searchInput) {
-      searchInput.removeAttribute('oninput');
-      searchInput.addEventListener('input', function() {
-        if (_ftsSearchVisible) {
-          hideFtsSearch();
-          _indexedFileIds = {};
-          updateFtsButton('default', '');
-        }
-        _doFilter();
-      });
-    }
-
-    var scopeCheck = document.getElementById('searchScopeCheck');
-    if (scopeCheck) {
-      scopeCheck.removeAttribute('onchange');
-      scopeCheck.addEventListener('change', function() { _doFilter(); });
-    }
-
-    // ═══ "Aktualisieren" Button → "Reset" Button umwandeln ═══
-    convertResetButton();
+  function loadTrimbleInExternal(file) {
+    if (!_extTrimble || _extTrimble.closed) return;
+    var fileId = getFileId(file);
+    var versionId = file.versionId || fileId;
+    if (!fileId) return;
+    var viewerUrl = 'https://web.connect.trimble.com/projects/' + projectId +
+      '/viewer/2D?id=' + versionId + '&version=' + versionId +
+      '&type=revisions&etag=' + versionId;
+    _extTrimble.location.href = viewerUrl;
   }
 
   // ═══════════════════════════════════════════════════════════════
-  //  RESET-BUTTON
-  //  Ersetzt den "Aktualisieren" Button durch einen "Reset" Button
-  //  der alle Filter zurücksetzt (außer Dateiarten + Baumstruktur)
+  //  NATIVER PDF-VIEWER — EXTERNES FENSTER
   // ═══════════════════════════════════════════════════════════════
-  function convertResetButton() {
-    // Button finden: der letzte .btn.primary im Toolbar mit onclick="loadFiles()"
-    var toolbar = document.getElementById('toolbar');
-    if (!toolbar) return;
-    var buttons = toolbar.querySelectorAll('.btn.primary');
-    var resetBtn = null;
-    for (var i = 0; i < buttons.length; i++) {
-      var attr = buttons[i].getAttribute('onclick');
-      if (attr && attr.indexOf('loadFiles') >= 0) {
-        resetBtn = buttons[i];
-        break;
-      }
+  function toggleExtNative() {
+    if (_extNative && !_extNative.closed) {
+      _extNative.close(); _extNative = null; updateButtons(); return;
     }
-    if (!resetBtn) return;
-
-    // Button umgestalten
-    resetBtn.removeAttribute('onclick');
-    resetBtn.innerHTML =
-      '<svg viewBox="0 0 24 24"><path d="M17.65 6.35A7.958 7.958 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>' +
-      'Reset';
-    resetBtn.title = 'Alle Filter zur\u00fccksetzen (Dateiarten und Ordnerauswahl bleiben)';
-    resetBtn.onclick = function() { doReset(); };
+    openExtNative();
   }
 
-  function doReset() {
-    // 1. Suchfeld leeren
-    var searchInput = document.getElementById('searchInput');
-    if (searchInput) searchInput.value = '';
-
-    // 2. "Gesamten Explorer" Checkbox deaktivieren
-    var scopeCheck = document.getElementById('searchScopeCheck');
-    if (scopeCheck) scopeCheck.checked = false;
-
-    // 3. searchResultFiles zurücksetzen
-    searchResultFiles = null;
-
-    // 4. Abort laufende Suchen
-    if (typeof searchAllAbortController !== 'undefined' && searchAllAbortController) {
-      searchAllAbortController.abort();
-      searchAllAbortController = null;
-    }
-
-    // 5. Volltextsuche zurücksetzen
-    hideFtsSearch();
-    _indexedFileIds = {};
-    updateFtsButton('default', '');
-
-    // 6. Pfadfilter zurücksetzen (alle Pfade auswählen)
-    if (typeof selectAllPaths === 'function') {
-      try { selectAllPaths(); } catch(e) {}
-    }
-
-    // 7. allFiles auf baseFiles zurücksetzen
-    allFiles = baseFiles.slice();
-
-    // 8. Tabelle neu rendern
-    renderTable();
-
-    // 9. Status aktualisieren
-    setStatus('ok', 'Filter zur\u00fcckgesetzt');
+  function openExtNative() {
+    var extWin = window.open('', 'sl-viewer-native', 'width=1200,height=900,menubar=no,toolbar=no,location=no,status=no,resizable=yes,scrollbars=yes');
+    if (!extWin) { alert('Popup blockiert!'); return; }
+    _extNative = extWin;
+    writeExtShell(extWin, 'Nativer PDF-Viewer');
+    if (_currentFile) setTimeout(function() { loadNativeInExternal(_currentFile); }, 150);
+    watchClose(function() { return _extNative; }, function() { _extNative = null; updateButtons(); });
+    updateButtons();
   }
 
-  var _searchAllDebounce = null;
+  function loadNativeInExternal(file) {
+    if (!_extNative || _extNative.closed) return;
+    var doc;
+    try { doc = _extNative.document; } catch(e) { return; }
+    var frame = doc.getElementById('extFrame');
+    var title = doc.getElementById('extTitle');
+    if (!frame) return;
 
-  function _doFilter() {
-    var inp = document.getElementById('searchInput');
-    var query = inp ? inp.value.trim() : '';
-    var scopeCheck = document.getElementById('searchScopeCheck');
-    var searchAll = scopeCheck && scopeCheck.checked;
+    var kind = getFileKind(file.name);
+    if (title) { title.textContent = file.name; _extNative.document.title = file.name + ' \u2014 S+L Viewer'; }
 
-    if (searchAll && query.length >= 2) {
-      // Debounce: Warte 400ms nach letztem Tastendruck bevor gesucht wird
-      if (_searchAllDebounce) clearTimeout(_searchAllDebounce);
-      _searchAllDebounce = setTimeout(function() {
-        if (typeof searchEntireProject === 'function') {
-          searchEntireProject(query.toLowerCase());
-        }
-      }, 400);
+    if (kind !== 'pdf' && kind !== 'image') {
+      frame.innerHTML = '<div class="placeholder"><div>Dieser Dateityp wird nur im Trimble Viewer unterst\u00fctzt.</div></div>';
       return;
-    } else {
-      if (_searchAllDebounce) { clearTimeout(_searchAllDebounce); _searchAllDebounce = null; }
-      searchResultFiles = null;
-      allFiles = baseFiles.slice();
-      if (typeof searchAllAbortController !== 'undefined' && searchAllAbortController) {
-        searchAllAbortController.abort(); searchAllAbortController = null;
-      }
-      renderTable();
-    }
-  }
-
-  window.filterTable = _doFilter;
-  window.fulltextSearch = ftsSearch;
-  window.ftsCache = _ftsCache;
-
-  // ═══════════════════════════════════════════════════════════════
-  //  LIVE-ZÄHLER: totalCount immer auf sichtbare Zeilen aktualisieren
-  //  Funktioniert für ALLE Filter (Name, Typ, Pfad, Gesamtsuche, FTS)
-  // ═══════════════════════════════════════════════════════════════
-  function updateVisibleCount() {
-    var el = document.getElementById('totalCount');
-    if (!el) return;
-    var rows = document.querySelectorAll('#tableBody tr');
-    var count = 0;
-    rows.forEach(function(tr) {
-      // Leere Info-Zeilen (z.B. "Keine Treffer") nicht zählen
-      if (tr.style.display === 'none') return;
-      if (tr.querySelector('td[colspan]')) return;
-      count++;
-    });
-    el.textContent = count;
-  }
-
-  // MutationObserver: Zählt nach jeder Änderung am tableBody
-  function setupCountObserver() {
-    var tbody = document.getElementById('tableBody');
-    if (!tbody) return;
-    var observer = new MutationObserver(function() {
-      // Kurz warten damit renderTable() fertig ist (display:none wird nach innerHTML gesetzt)
-      setTimeout(updateVisibleCount, 50);
-    });
-    observer.observe(tbody, { childList: true, subtree: true, attributes: true, attributeFilter: ['style'] });
-
-    // Auch bei Scroll-Events prüfen (für den Fall dass renderTable display ändert)
-    // Initial zählen
-    setTimeout(updateVisibleCount, 500);
-  }
-
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function() { init(); setupCountObserver(); setupTreeHighlight(); });
-  else setTimeout(function() { init(); setupCountObserver(); setupTreeHighlight(); }, 500);
-
-  // ═══════════════════════════════════════════════════════════════
-  //  BAUM-HIGHLIGHTING: Eltern-Ordner markieren wenn Kinder
-  //  angehakt sind (indeterminate-Style)
-  // ═══════════════════════════════════════════════════════════════
-  function updateTreeParentHighlight() {
-    var treeBody = document.getElementById('treeBody');
-    if (!treeBody) return;
-
-    // Erst alle indeterminate entfernen
-    var allRows = treeBody.querySelectorAll('.tree-row');
-    for (var i = 0; i < allRows.length; i++) {
-      allRows[i].classList.remove('has-checked-child');
     }
 
-    // Alle checked Nodes finden
-    var checkedRows = treeBody.querySelectorAll('.tree-row.checked');
-    checkedRows.forEach(function(checkedRow) {
-      // Nach oben traversieren: .tree-node → parent .tree-children → parent .tree-node → .tree-row
-      var node = checkedRow.closest('.tree-node');
-      if (!node) return;
-      var parent = node.parentElement;
-      while (parent) {
-        if (parent.classList && parent.classList.contains('tree-children')) {
-          var parentNode = parent.closest('.tree-node');
-          if (parentNode) {
-            var parentRow = parentNode.querySelector(':scope > .tree-row');
-            if (parentRow && !parentRow.classList.contains('checked')) {
-              parentRow.classList.add('has-checked-child');
-            }
-          }
-        }
-        // Weiter nach oben
-        parent = parent.parentElement;
-        if (parent && parent.id === 'treeBody') break;
+    frame.innerHTML = '<div class="loading"><div class="spinner"></div><div style="font-size:13px">Lade ' + escHtml(file.name) + '\u2026</div></div>';
+
+    var fileId = getFileId(file);
+    if (!fileId) { frame.innerHTML = '<div class="placeholder"><div>Keine Datei-ID</div></div>'; return; }
+
+    getDownloadUrl(fileId).then(function(signedUrl) {
+      if (!_extNative || _extNative.closed) return;
+      var extDoc;
+      try { extDoc = _extNative.document; } catch(e) { return; }
+      var extFrame = extDoc.getElementById('extFrame');
+      if (!extFrame) return;
+      extFrame.innerHTML = '';
+
+      if (kind === 'pdf') {
+        var proxyUrl = toPdfViewUrl(signedUrl);
+        var iframe = extDoc.createElement('iframe');
+        iframe.src = proxyUrl;
+        iframe.setAttribute('allow', 'fullscreen');
+        iframe.style.cssText = 'width:100%;height:100%;border:none';
+        extFrame.appendChild(iframe);
+      } else {
+        var imgWrap = extDoc.createElement('div');
+        imgWrap.style.cssText = 'width:100%;height:100%;display:flex;align-items:center;justify-content:center;overflow:auto;background:#1a1d27';
+        var img = extDoc.createElement('img');
+        img.src = signedUrl;
+        img.style.cssText = 'max-width:100%;max-height:100%;box-shadow:0 4px 20px rgba(0,0,0,.5)';
+        imgWrap.appendChild(img);
+        extFrame.appendChild(imgWrap);
       }
+    }).catch(function(e) {
+      console.error('[NativeViewer] Fehler:', e);
+      try {
+        var f = _extNative.document.getElementById('extFrame');
+        if (f) f.innerHTML = '<div class="placeholder" style="color:#ef4444">Fehler: ' + e.message + '</div>';
+      } catch(e2) {}
     });
   }
 
-  function setupTreeHighlight() {
-    var treeBody = document.getElementById('treeBody');
-    if (!treeBody) return;
-
-    // CSS für has-checked-child injizieren
-    var style = document.createElement('style');
-    style.textContent =
-      '.tree-row.has-checked-child .tree-checkbox { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }' +
-      '.tree-row.has-checked-child .tree-label { color: var(--accent); opacity: 0.7; }';
-    document.head.appendChild(style);
-
-    // MutationObserver auf den Baum — reagiert auf class-Änderungen (checked/unchecked)
-    var observer = new MutationObserver(function() {
-      setTimeout(updateTreeParentHighlight, 50);
-    });
-    observer.observe(treeBody, {
-      subtree: true,
-      attributes: true,
-      attributeFilter: ['class'],
-      childList: true,
-    });
-
-    // Initial ausführen
-    setTimeout(updateTreeParentHighlight, 1000);
+  // ═══════════════════════════════════════════════════════════════
+  //  SHARED HELPERS
+  // ═══════════════════════════════════════════════════════════════
+  function writeExtShell(extWin, subtitle) {
+    var doc = extWin.document;
+    doc.open();
+    doc.write('<!DOCTYPE html><html lang="de"><head><meta charset="UTF-8"><title>S+L Viewer</title><style>' +
+      '*{box-sizing:border-box;margin:0;padding:0}' +
+      'body{background:#1a1d27;color:#e4e8f0;font-family:"DM Sans","Segoe UI",sans-serif;height:100vh;display:flex;flex-direction:column;overflow:hidden}' +
+      '.toolbar{display:flex;align-items:center;gap:8px;padding:8px 12px;background:#0f1117;border-bottom:1px solid #2a2d3e;flex-shrink:0}' +
+      '.title{flex:1;font-size:13px;font-weight:600;color:#e4e8f0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-left:8px}' +
+      '.subtitle{font-size:10px;color:#7a8199;font-weight:400;margin-left:8px;flex-shrink:0}' +
+      'button{background:none;border:1px solid #2a2d3e;border-radius:4px;color:#7a8199;cursor:pointer;padding:4px 10px;font-size:12px;font-family:inherit;display:inline-flex;align-items:center;gap:4px;transition:all .15s}' +
+      'button:hover{border-color:#00c2ff;color:#00c2ff;background:#1e2235}' +
+      'button svg{width:14px;height:14px;fill:currentColor}' +
+      '#extFrame{flex:1;overflow:hidden;background:#525659}' +
+      '#extFrame iframe{width:100%;height:100%;border:none;display:block}' +
+      '.placeholder{display:flex;flex-direction:column;align-items:center;justify-content:center;width:100%;height:100%;color:#7a8199;gap:16px;text-align:center;padding:40px}' +
+      '.placeholder svg{width:64px;height:64px;opacity:.3;fill:currentColor}' +
+      '.loading{display:flex;flex-direction:column;align-items:center;justify-content:center;width:100%;height:100%;color:#7a8199;gap:12px}' +
+      '.spinner{width:40px;height:40px;border:3px solid #2a2d3e;border-top-color:#00c2ff;border-radius:50%;animation:spin .7s linear infinite}' +
+      '@keyframes spin{to{transform:rotate(360deg)}}' +
+      '</style></head><body>' +
+      '<div class="toolbar">' +
+        '<svg width="20" height="20" viewBox="0 0 24 24" fill="#00c2ff"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6z"/></svg>' +
+        '<div class="title" id="extTitle">Warte auf Auswahl\u2026</div>' +
+        '<span class="subtitle">' + escHtml(subtitle) + '</span>' +
+        '<button id="extFullscreen"><svg viewBox="0 0 24 24"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg> Vollbild</button>' +
+      '</div>' +
+      '<div id="extFrame">' +
+        '<div class="placeholder"><svg viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg><div>Klicken Sie im Explorer auf das Auge-Symbol<br>um eine Datei hier anzuzeigen</div></div>' +
+      '</div>' +
+      '</body></html>');
+    doc.close();
+    setTimeout(function() {
+      try {
+        var fsBtn = extWin.document.getElementById('extFullscreen');
+        if (fsBtn) fsBtn.onclick = function() {
+          if (extWin.document.documentElement.requestFullscreen) extWin.document.documentElement.requestFullscreen();
+        };
+      } catch(e) {}
+    }, 100);
   }
 
-  console.log('[FTS] Volltextsuche v10 geladen (DOM-basierte Sichtbarkeit)');
+  function showExtPlaceholder(extWin) {
+    try {
+      var frame = extWin.document.getElementById('extFrame');
+      var title = extWin.document.getElementById('extTitle');
+      if (frame) frame.innerHTML = '<div class="placeholder"><svg viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg><div>Klicken Sie im Explorer auf das Auge-Symbol<br>um eine Datei hier anzuzeigen</div></div>';
+      if (title) title.textContent = 'Warte auf Auswahl\u2026';
+    } catch(e) {}
+  }
+
+  function watchClose(getWin, onClosed) {
+    var interval = setInterval(function() {
+      var w = getWin();
+      if (!w || w.closed) { clearInterval(interval); onClosed(); }
+    }, 500);
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  //  HOOKS
+  // ═══════════════════════════════════════════════════════════════
+  var _btnInjected = false;
+  var _injectInterval = setInterval(function() {
+    if (document.querySelector('.preview-header')) {
+      injectDetachButtons();
+      _btnInjected = true;
+      clearInterval(_injectInterval);
+    }
+  }, 500);
+
+  // ─── closePreview überschreiben ───
+  // Wenn User auf X klickt: Inline verbergen, _inlineHidden merken
+  var _origClosePreview = window.closePreview;
+  window.closePreview = function() {
+    // Merken dass User den Inline-Viewer bewusst geschlossen hat
+    _inlineHidden = true;
+
+    // Auge-Highlighting entfernen (nur wenn keine externen Fenster)
+    if (!hasExternalWindow()) {
+      _currentFile = null;
+      _currentIdx = -1;
+      var allBtns = document.querySelectorAll('.prev-btn');
+      for (var i = 0; i < allBtns.length; i++) allBtns[i].classList.remove('active');
+    }
+
+    // Nativ-Fenster: Platzhalter (nur wenn kein externes Fenster aktiv)
+    if (_extNative && !_extNative.closed && !hasExternalWindow()) {
+      showExtPlaceholder(_extNative);
+    }
+
+    // Original closePreview aufrufen (Panel zuklappen)
+    if (typeof _origClosePreview === 'function') _origClosePreview();
+  };
+
+  // ─── openPreview überschreiben ───
+  var _origOpenPreview = window.openPreview;
+  window.openPreview = function(idx) {
+    var file = allFiles[idx];
+    if (!file) return;
+
+    _currentFile = file;
+    _currentIdx = idx;
+
+    if (!_btnInjected) injectDetachButtons();
+
+    // ═══ IMMER Auge-Highlighting aktualisieren ═══
+    updateEyeHighlight(idx);
+
+    // ═══ Externe Fenster aktualisieren (falls offen) ═══
+    if (_extTrimble && !_extTrimble.closed) {
+      loadTrimbleInExternal(file);
+    }
+    if (_extNative && !_extNative.closed) {
+      loadNativeInExternal(file);
+    }
+
+    // ═══ Eingebetteten Viewer: NUR öffnen wenn nicht bewusst verborgen ═══
+    if (hasExternalWindow() && _inlineHidden) {
+      // Externes Fenster aktiv UND Inline verborgen → Inline NICHT öffnen
+      // Aber Buttons aktualisieren
+      setTimeout(function() { updateButtons(); }, 100);
+      return;
+    }
+
+    // Inline öffnen (User hat ihn nicht geschlossen, oder es gibt kein externes Fenster)
+    _inlineHidden = false; // Beim nächsten Auge-Klick ohne externes Fenster: wieder öffnen
+    if (typeof _origOpenPreview === 'function') {
+      _origOpenPreview(idx);
+    }
+
+    setTimeout(function() {
+      if (!_btnInjected) injectDetachButtons();
+      updateButtons();
+    }, 100);
+  };
+
+  console.log('[Viewer] Enhanced Viewer v13 geladen (Inline verbergbar)');
 })();
