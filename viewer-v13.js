@@ -13,49 +13,10 @@
   var _extNative = null;
   var _inlineHidden = false; // User hat Inline-Viewer bewusst geschlossen
 
-  // ═══════════════════════════════════════════════════════════════
-  //  TOKEN-REFRESH: Erneuert den Token bei 401/403
-  // ═══════════════════════════════════════════════════════════════
-  function refreshToken() {
-    return new Promise(function(resolve) {
-      if (typeof workspaceAPI !== 'undefined' && workspaceAPI) {
-        workspaceAPI.requestPermission(function(token) {
-          if (token) {
-            accessToken = token;
-            console.log('[Viewer] Token erneuert via requestPermission');
-            resolve(true);
-          } else {
-            // Fallback: getAccessToken
-            if (typeof workspaceAPI.getAccessToken === 'function') {
-              workspaceAPI.getAccessToken(function(t) {
-                if (t) { accessToken = t; console.log('[Viewer] Token erneuert via getAccessToken'); }
-                resolve(!!t);
-              });
-            } else {
-              resolve(false);
-            }
-          }
-        });
-        // Timeout: Falls kein Callback kommt
-        setTimeout(function() { resolve(false); }, 8000);
-      } else {
-        resolve(false);
-      }
-    });
-  }
-
-  function getDownloadUrl(fileId, _isRetry) {
+  function getDownloadUrl(fileId) {
     return fetch(PROXY_URL + '/core-fs/' + fileId + '/downloadurl?base=' + TC_BASE, {
       headers: { 'Authorization': 'Bearer ' + accessToken },
     }).then(function(r) {
-      if ((r.status === 401 || r.status === 403) && !_isRetry) {
-        // Token abgelaufen → erneuern und erneut versuchen
-        console.log('[Viewer] Token abgelaufen (' + r.status + '), erneuere...');
-        return refreshToken().then(function(ok) {
-          if (ok) return getDownloadUrl(fileId, true);
-          throw new Error('Token konnte nicht erneuert werden (' + r.status + ')');
-        });
-      }
       if (!r.ok) throw new Error('Download-URL Fehler: ' + r.status);
       return r.json();
     }).then(function(data) {
@@ -339,13 +300,10 @@
   }, 500);
 
   // ─── closePreview überschreiben ───
-  // Wenn User auf X klickt: Inline verbergen, _inlineHidden merken
   var _origClosePreview = window.closePreview;
   window.closePreview = function() {
-    // Merken dass User den Inline-Viewer bewusst geschlossen hat
     _inlineHidden = true;
 
-    // Auge-Highlighting entfernen (nur wenn keine externen Fenster)
     if (!hasExternalWindow()) {
       _currentFile = null;
       _currentIdx = -1;
@@ -353,12 +311,10 @@
       for (var i = 0; i < allBtns.length; i++) allBtns[i].classList.remove('active');
     }
 
-    // Nativ-Fenster: Platzhalter (nur wenn kein externes Fenster aktiv)
     if (_extNative && !_extNative.closed && !hasExternalWindow()) {
       showExtPlaceholder(_extNative);
     }
 
-    // Original closePreview aufrufen (Panel zuklappen)
     if (typeof _origClosePreview === 'function') _origClosePreview();
   };
 
@@ -373,10 +329,8 @@
 
     if (!_btnInjected) injectDetachButtons();
 
-    // ═══ IMMER Auge-Highlighting aktualisieren ═══
     updateEyeHighlight(idx);
 
-    // ═══ Externe Fenster aktualisieren (falls offen) ═══
     if (_extTrimble && !_extTrimble.closed) {
       loadTrimbleInExternal(file);
     }
@@ -384,16 +338,12 @@
       loadNativeInExternal(file);
     }
 
-    // ═══ Eingebetteten Viewer: NUR öffnen wenn nicht bewusst verborgen ═══
     if (hasExternalWindow() && _inlineHidden) {
-      // Externes Fenster aktiv UND Inline verborgen → Inline NICHT öffnen
-      // Aber Buttons aktualisieren
       setTimeout(function() { updateButtons(); }, 100);
       return;
     }
 
-    // Inline öffnen (User hat ihn nicht geschlossen, oder es gibt kein externes Fenster)
-    _inlineHidden = false; // Beim nächsten Auge-Klick ohne externes Fenster: wieder öffnen
+    _inlineHidden = false;
     if (typeof _origOpenPreview === 'function') {
       _origOpenPreview(idx);
     }
