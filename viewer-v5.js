@@ -13,49 +13,10 @@
   var _extNative = null;
   var _inlineHidden = false; // User hat Inline-Viewer bewusst geschlossen
 
-  // ═══════════════════════════════════════════════════════════════
-  //  TOKEN-REFRESH: Erneuert den Token bei 401/403
-  // ═══════════════════════════════════════════════════════════════
-  function refreshToken() {
-    return new Promise(function(resolve) {
-      if (typeof workspaceAPI !== 'undefined' && workspaceAPI) {
-        workspaceAPI.requestPermission(function(token) {
-          if (token) {
-            accessToken = token;
-            console.log('[Viewer] Token erneuert via requestPermission');
-            resolve(true);
-          } else {
-            // Fallback: getAccessToken
-            if (typeof workspaceAPI.getAccessToken === 'function') {
-              workspaceAPI.getAccessToken(function(t) {
-                if (t) { accessToken = t; console.log('[Viewer] Token erneuert via getAccessToken'); }
-                resolve(!!t);
-              });
-            } else {
-              resolve(false);
-            }
-          }
-        });
-        // Timeout: Falls kein Callback kommt
-        setTimeout(function() { resolve(false); }, 8000);
-      } else {
-        resolve(false);
-      }
-    });
-  }
-
-  function getDownloadUrl(fileId, _isRetry) {
+  function getDownloadUrl(fileId) {
     return fetch(PROXY_URL + '/core-fs/' + fileId + '/downloadurl?base=' + TC_BASE, {
       headers: { 'Authorization': 'Bearer ' + accessToken },
     }).then(function(r) {
-      if ((r.status === 401 || r.status === 403) && !_isRetry) {
-        // Token abgelaufen → erneuern und erneut versuchen
-        console.log('[Viewer] Token abgelaufen (' + r.status + '), erneuere...');
-        return refreshToken().then(function(ok) {
-          if (ok) return getDownloadUrl(fileId, true);
-          throw new Error('Token konnte nicht erneuert werden (' + r.status + ')');
-        });
-      }
       if (!r.ok) throw new Error('Download-URL Fehler: ' + r.status);
       return r.json();
     }).then(function(data) {
