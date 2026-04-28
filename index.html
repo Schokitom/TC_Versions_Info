@@ -1434,27 +1434,30 @@ async function downloadFile(idx, explicitVersionId) {
   if (!versionId) { alert('Keine Datei-ID für Download verfügbar.'); return; }
 
   try {
-    // Hole Download-URL vom API (gibt 302 redirect oder {url: "..."} zurück)
-    const data = await tcGet(`/files/${versionId}/download`);
-    const dlUrl = typeof data === 'string' ? data : (data.url || data.downloadUrl || data.link || null);
-    if (dlUrl) {
-      const a = document.createElement('a');
-      a.href = dlUrl;
-      a.download = f.name || 'download';
-      a.target = '_blank';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-    } else {
-      // Fallback: direkte API-URL mit Token im Header ist nicht möglich per <a>,
-      // daher öffnen wir die Download-URL als neuen Tab
-      const fallbackUrl = `${tcApiBase}/files/${versionId}/download`;
-      window.open(fallbackUrl, '_blank');
+    // Trimble Connect API: GET /files/{versionId}/content liefert die Datei
+    const res = await fetch(`${tcApiBase}/files/${versionId}/content`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      redirect: 'follow'
+    });
+
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
     }
+
+    // Response ist die Datei selbst (oder ein Redirect zur Download-URL)
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = f.name || 'download';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   } catch (err) {
     console.error('[S+L Explorer] Download-Fehler:', err);
-    // Fallback: API-URL direkt öffnen
-    window.open(`${tcApiBase}/files/${versionId}/download`, '_blank');
+    // Fallback: URL direkt im neuen Tab öffnen
+    window.open(`${tcApiBase}/files/${versionId}/content?redirect=true`, '_blank');
   }
 }
 
@@ -2388,16 +2391,26 @@ async function openFileById(fileId, fileName) {
 
 async function downloadFileById(fileId, fileName) {
   try {
-    const data = await tcGet(`/files/${fileId}/download`);
-    const dlUrl = typeof data === 'string' ? data : (data.url || data.downloadUrl || null);
-    if (dlUrl) {
-      const a = document.createElement('a');
-      a.href = dlUrl; a.download = fileName; a.target = '_blank';
-      document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    } else {
-      window.open(`${tcApiBase}/files/${fileId}/download`, '_blank');
-    }
-  } catch { window.open(`${tcApiBase}/files/${fileId}/download`, '_blank'); }
+    const res = await fetch(`${tcApiBase}/files/${fileId}/content`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      redirect: 'follow'
+    });
+
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName || 'download';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    console.error('[S+L Explorer] Download-Fehler:', err);
+    window.open(`${tcApiBase}/files/${fileId}/content?redirect=true`, '_blank');
+  }
 }
 
 // ─────────────────────────────────────────
