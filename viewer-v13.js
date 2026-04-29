@@ -247,7 +247,19 @@
       console.error('[NativeViewer] Fehler:', e);
       try {
         var f = _extNative.document.getElementById('extFrame');
-        if (f) f.innerHTML = '<div class="placeholder" style="color:#ef4444">Fehler: ' + e.message + '</div>';
+        if (f) {
+          var isSessionExpired = e.message && (e.message.indexOf('Token') >= 0 || e.message.indexOf('401') >= 0 || e.message.indexOf('403') >= 0);
+          if (isSessionExpired) {
+            f.innerHTML = '<div class="placeholder">' +
+              '<svg viewBox="0 0 24 24" style="width:48px;height:48px;fill:#f59e0b;opacity:.7"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>' +
+              '<div style="color:#f59e0b;font-size:15px;font-weight:600">Sitzung abgelaufen</div>' +
+              '<div style="color:#7a8199;font-size:12px">Die Trimble Connect Sitzung ist abgelaufen.<br>Bitte laden Sie die Seite im Explorer neu.</div>' +
+              '<button onclick="window.opener && window.opener.location.reload()" style="margin-top:8px;background:#005f8a;color:#fff;border:none;border-radius:6px;padding:8px 20px;font-size:13px;cursor:pointer">Explorer neu laden</button>' +
+              '</div>';
+          } else {
+            f.innerHTML = '<div class="placeholder" style="color:#ef4444">Fehler: ' + e.message + '</div>';
+          }
+        }
       } catch(e2) {}
     });
   }
@@ -378,6 +390,31 @@
       updateButtons();
     }, 100);
   };
+
+  // ═══════════════════════════════════════════════════════════════
+  //  SESSION-ÜBERWACHUNG: Bei abgelaufener Session Info-Leiste zeigen
+  // ═══════════════════════════════════════════════════════════════
+  var _sessionBannerShown = false;
+  function showSessionExpiredBanner() {
+    if (_sessionBannerShown) return;
+    _sessionBannerShown = true;
+    var banner = document.createElement('div');
+    banner.id = 'sl-session-banner';
+    banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#f59e0b;color:#000;padding:8px 16px;font-size:13px;font-family:var(--font-ui,sans-serif);display:flex;align-items:center;justify-content:center;gap:12px';
+    banner.innerHTML = '<span>\u26A0 Die Sitzung ist abgelaufen. Bitte Seite neu laden f\u00fcr reibungslose Weiterarbeit.</span>' +
+      '<button onclick="location.reload()" style="background:#000;color:#f59e0b;border:none;border-radius:4px;padding:4px 14px;font-size:12px;cursor:pointer;font-weight:600">Neu laden</button>' +
+      '<button onclick="this.parentElement.remove()" style="background:none;border:none;color:#000;cursor:pointer;font-size:16px;padding:0 4px">\u2715</button>';
+    document.body.appendChild(banner);
+  }
+
+  // Prüfe periodisch ob die Session noch gültig ist
+  setInterval(function() {
+    if (_sessionBannerShown) return;
+    if (typeof workspaceAPI === 'undefined' || !workspaceAPI) {
+      // workspaceAPI weg → Session definitiv abgelaufen
+      showSessionExpiredBanner();
+    }
+  }, 30000); // alle 30 Sekunden prüfen
 
   console.log('[Viewer] Enhanced Viewer v13 geladen (Inline verbergbar)');
 })();
