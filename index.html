@@ -1433,31 +1433,35 @@ async function downloadFile(idx, explicitVersionId) {
   const versionId = explicitVersionId || f.versionId || f.id;
   if (!versionId) { alert('Keine Datei-ID für Download verfügbar.'); return; }
 
+  const PROXY_URL = 'https://slproxy.schoknechtthomas.workers.dev';
+  const TC_BASE   = 'https://app21.connect.trimble.com';
+
   try {
-    // Trimble Connect API: GET /files/{versionId}/content liefert die Datei
-    const res = await fetch(`${tcApiBase}/files/${versionId}/content`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-      redirect: 'follow'
+    // Schritt 1: Download-URL über Proxy holen
+    const res = await fetch(`${PROXY_URL}/core-fs/${versionId}/downloadurl?base=${TC_BASE}`, {
+      headers: { Authorization: `Bearer ${accessToken}` }
     });
+    if (!res.ok) throw new Error(`Proxy HTTP ${res.status}`);
+    const data = await res.json();
+    if (!data.url) throw new Error('Keine Download-URL erhalten');
 
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}`);
-    }
+    // Schritt 2: Datei von der vorsignierten URL laden
+    const fileRes = await fetch(data.url);
+    if (!fileRes.ok) throw new Error(`Download HTTP ${fileRes.status}`);
+    const blob = await fileRes.blob();
 
-    // Response ist die Datei selbst (oder ein Redirect zur Download-URL)
-    const blob = await res.blob();
+    // Schritt 3: Download auslösen
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     a.download = f.name || 'download';
+    a.style.display = 'none';
     document.body.appendChild(a);
     a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
   } catch (err) {
     console.error('[S+L Explorer] Download-Fehler:', err);
-    // Fallback: URL direkt im neuen Tab öffnen
-    window.open(`${tcApiBase}/files/${versionId}/content?redirect=true`, '_blank');
+    alert('Download fehlgeschlagen: ' + err.message);
   }
 }
 
@@ -2390,29 +2394,34 @@ async function openFileById(fileId, fileName) {
 }
 
 async function downloadFileById(fileId, fileName) {
+  const PROXY_URL = 'https://slproxy.schoknechtthomas.workers.dev';
+  const TC_BASE   = 'https://app21.connect.trimble.com';
+
   try {
-    const res = await fetch(`${tcApiBase}/files/${fileId}/content`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-      redirect: 'follow'
+    const res = await fetch(`${PROXY_URL}/core-fs/${fileId}/downloadurl?base=${TC_BASE}`, {
+      headers: { Authorization: `Bearer ${accessToken}` }
     });
+    if (!res.ok) throw new Error(`Proxy HTTP ${res.status}`);
+    const data = await res.json();
+    if (!data.url) throw new Error('Keine Download-URL erhalten');
 
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const fileRes = await fetch(data.url);
+    if (!fileRes.ok) throw new Error(`Download HTTP ${fileRes.status}`);
+    const blob = await fileRes.blob();
 
-    const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     a.download = fileName || 'download';
+    a.style.display = 'none';
     document.body.appendChild(a);
     a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
   } catch (err) {
     console.error('[S+L Explorer] Download-Fehler:', err);
-    window.open(`${tcApiBase}/files/${fileId}/content?redirect=true`, '_blank');
+    alert('Download fehlgeschlagen: ' + err.message);
   }
 }
-
 // ─────────────────────────────────────────
 //  Path dropdown
 // ─────────────────────────────────────────
