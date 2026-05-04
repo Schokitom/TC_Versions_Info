@@ -1,6 +1,7 @@
 // ═══════════════════════════════════════════════════════════════
-//  S+L Explorer — Enhanced Viewer v13
-//  Fix: Eingebetteter Viewer kann verborgen werden
+//  S+L Explorer — Enhanced Viewer v14
+//  Fix: Session-Check nutzt korrekte Variable (API),
+//       Banner-Reload speichert Zustand vor location.reload()
 // ═══════════════════════════════════════════════════════════════
 (function() {
 
@@ -16,16 +17,38 @@
   // ─── Token-Refresh bei abgelaufenem Token ───
   function refreshToken() {
     return new Promise(function(resolve) {
-      if (typeof workspaceAPI !== 'undefined' && workspaceAPI) {
+      // Nutze die globale Variable "API" (so heißt sie in index.html)
+      var wsApi = (typeof API !== 'undefined' && API) ? API : (typeof workspaceAPI !== 'undefined' ? workspaceAPI : null);
+      if (wsApi && wsApi.extension) {
         var resolved = false;
-        workspaceAPI.requestPermission(function(token) {
-          if (resolved) return;
-          resolved = true;
-          if (token) { accessToken = token; console.log('[Viewer] Token erneuert'); resolve(true); }
-          else if (typeof workspaceAPI.getAccessToken === 'function') {
-            workspaceAPI.getAccessToken(function(t) { if (t) accessToken = t; resolve(!!t); });
-          } else { resolve(false); }
-        });
+        // Versuche requestPermission
+        try {
+          var result = wsApi.extension.requestPermission('accesstoken');
+          if (result && typeof result.then === 'function') {
+            result.then(function(token) {
+              if (resolved) return;
+              resolved = true;
+              if (token && token !== 'pending' && token !== 'denied') {
+                accessToken = token;
+                console.log('[Viewer] Token erneuert via requestPermission');
+                resolve(true);
+              } else {
+                resolve(false);
+              }
+            }).catch(function() {
+              if (!resolved) { resolved = true; resolve(false); }
+            });
+          } else if (result && result !== 'pending' && result !== 'denied') {
+            resolved = true;
+            accessToken = result;
+            resolve(true);
+          } else {
+            resolved = true;
+            resolve(false);
+          }
+        } catch(e) {
+          if (!resolved) { resolved = true; resolve(false); }
+        }
         setTimeout(function() { if (!resolved) { resolved = true; resolve(false); } }, 8000);
       } else { resolve(false); }
     });
@@ -254,7 +277,7 @@
               '<svg viewBox="0 0 24 24" style="width:48px;height:48px;fill:#f59e0b;opacity:.7"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>' +
               '<div style="color:#f59e0b;font-size:15px;font-weight:600">Sitzung abgelaufen</div>' +
               '<div style="color:#7a8199;font-size:12px">Die Trimble Connect Sitzung ist abgelaufen.<br>Bitte laden Sie die Seite im Explorer neu.</div>' +
-              '<button onclick="window.opener && window.opener.location.reload()" style="margin-top:8px;background:#005f8a;color:#fff;border:none;border-radius:6px;padding:8px 20px;font-size:13px;cursor:pointer">Explorer neu laden</button>' +
+              '<button onclick="window.opener && window.opener.slSessionReload && window.opener.slSessionReload()" style="margin-top:8px;background:#005f8a;color:#fff;border:none;border-radius:6px;padding:8px 20px;font-size:13px;cursor:pointer">Explorer neu laden</button>' +
               '</div>';
           } else {
             f.innerHTML = '<div class="placeholder" style="color:#ef4444">Fehler: ' + e.message + '</div>';
@@ -392,9 +415,12 @@
   };
 
   // ═══════════════════════════════════════════════════════════════
-  //  SESSION-ÜBERWACHUNG: Bei abgelaufener Session Info-Leiste zeigen
+  //  SESSION-ÜBERWACHUNG
+  //  Prüft ob die Session noch gültig ist durch einen echten
+  //  API-Call, NICHT durch Prüfung einer Variable.
   // ═══════════════════════════════════════════════════════════════
   var _sessionBannerShown = false;
+
   function showSessionExpiredBanner() {
     if (_sessionBannerShown) return;
     _sessionBannerShown = true;
@@ -402,19 +428,74 @@
     banner.id = 'sl-session-banner';
     banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#f59e0b;color:#000;padding:8px 16px;font-size:13px;font-family:var(--font-ui,sans-serif);display:flex;align-items:center;justify-content:center;gap:12px';
     banner.innerHTML = '<span>\u26A0 Die Sitzung ist abgelaufen. Bitte Seite neu laden f\u00fcr reibungslose Weiterarbeit.</span>' +
-      '<button onclick="location.reload()" style="background:#000;color:#f59e0b;border:none;border-radius:4px;padding:4px 14px;font-size:12px;cursor:pointer;font-weight:600">Neu laden</button>' +
+      '<button onclick="slSessionReload()" style="background:#000;color:#f59e0b;border:none;border-radius:4px;padding:4px 14px;font-size:12px;cursor:pointer;font-weight:600">Neu laden</button>' +
       '<button onclick="this.parentElement.remove()" style="background:none;border:none;color:#000;cursor:pointer;font-size:16px;padding:0 4px">\u2715</button>';
     document.body.appendChild(banner);
   }
 
-  // Prüfe periodisch ob die Session noch gültig ist
-  setInterval(function() {
-    if (_sessionBannerShown) return;
-    if (typeof workspaceAPI === 'undefined' || !workspaceAPI) {
-      // workspaceAPI weg → Session definitiv abgelaufen
-      showSessionExpiredBanner();
+  // Globale Reload-Funktion: speichert Zustand, dann reloaded
+  window.slSessionReload = function() {
+    // session-restore Zustand speichern (falls Modul geladen)
+    if (window.slSessionRestore && typeof window.slSessionRestore.saveNow === 'function') {
+      window.slSessionRestore.saveNow();
+      console.log('[Viewer] Zustand vor Reload gespeichert.');
     }
-  }, 30000); // alle 30 Sekunden prüfen
+    location.reload();
+  };
 
-  console.log('[Viewer] Enhanced Viewer v13 geladen (Inline verbergbar)');
+  // ─── Session-Prüfung: Echter API-Call statt Variable prüfen ───
+  // Erster Check erst nach 2 Minuten, danach alle 60 Sekunden.
+  // Das verhindert Fehlalarme direkt nach dem Laden.
+  var _sessionCheckStarted = false;
+
+  function startSessionCheck() {
+    if (_sessionCheckStarted) return;
+    _sessionCheckStarted = true;
+
+    // Erster Check nach 2 Minuten
+    setTimeout(function() {
+      checkSessionAlive();
+      // Danach alle 60 Sekunden
+      setInterval(checkSessionAlive, 60000);
+    }, 120000);
+  }
+
+  function checkSessionAlive() {
+    if (_sessionBannerShown) return;
+
+    // Versuche einen leichtgewichtigen API-Call
+    if (typeof tcApiBase !== 'undefined' && tcApiBase && typeof projectId !== 'undefined' && projectId) {
+      fetch(tcApiBase + '/projects/' + projectId, {
+        headers: { 'Authorization': 'Bearer ' + accessToken }
+      }).then(function(res) {
+        if (res.status === 401 || res.status === 403) {
+          console.log('[Viewer] Session-Check: Token abgelaufen (' + res.status + '), versuche Refresh...');
+          // Erst Token-Refresh versuchen
+          refreshToken().then(function(ok) {
+            if (!ok) {
+              console.log('[Viewer] Token-Refresh fehlgeschlagen → Banner anzeigen');
+              showSessionExpiredBanner();
+            } else {
+              console.log('[Viewer] Token erfolgreich erneuert.');
+            }
+          });
+        }
+        // Andere Status (200, 404, etc.) = Session noch gültig
+      }).catch(function() {
+        // Netzwerk-Fehler → nicht als Session-Ablauf werten
+        console.log('[Viewer] Session-Check: Netzwerk-Fehler (ignoriert)');
+      });
+    }
+  }
+
+  // Session-Check starten sobald die Extension initialisiert ist
+  // (warten auf tcApiBase und projectId)
+  var _waitForInit = setInterval(function() {
+    if (typeof tcApiBase !== 'undefined' && tcApiBase && typeof projectId !== 'undefined' && projectId) {
+      clearInterval(_waitForInit);
+      startSessionCheck();
+    }
+  }, 2000);
+
+  console.log('[Viewer] Enhanced Viewer v14 geladen (Session-Check via API-Call)');
 })();
