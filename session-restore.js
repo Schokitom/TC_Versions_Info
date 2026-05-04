@@ -1,16 +1,12 @@
 /**
- * session-restore.js — S+L Explorer Session-Restore Modul
+ * session-restore.js v2 — S+L Explorer Session-Restore Modul
  *
  * Speichert den Explorer-Zustand (angehakte Ordner, aufgeklappte Nodes,
  * Dateiart-Filter, Suchfeld) periodisch in sessionStorage.
  * Nach einem Reload wird der Zustand automatisch wiederhergestellt.
  *
- * Einbindung:
+ * Einbindung (NACH index.html und viewer):
  *   <script src="session-restore.js"></script>
- *
- * Das Script muss NACH index.html geladen werden, damit die globalen
- * Variablen und Funktionen (projectId, toggleTreeNode, checkTreeNode, etc.)
- * verfügbar sind.
  */
 (function () {
   'use strict';
@@ -24,34 +20,43 @@
   // =========================================================================
 
   function collectState() {
-    // Angehakte Ordner (DOM-basiert)
+    // Angehakte Ordner: aus checkedFolderIds (Set in index.html)
     var checkedFolders = [];
-    document.querySelectorAll('.tree-row.checked').forEach(function (row) {
-      var node = row.closest('.tree-node');
-      if (node && node.dataset.id) {
-        checkedFolders.push(node.dataset.id);
+    if (typeof checkedFolderIds !== 'undefined' && checkedFolderIds) {
+      if (checkedFolderIds instanceof Set) {
+        checkedFolderIds.forEach(function (id) { checkedFolders.push(id); });
+      } else {
+        // Falls es ein Object ist (ältere Version)
+        checkedFolders = Object.keys(checkedFolderIds);
       }
-    });
+    }
 
-    // Aufgeklappte Baum-Nodes
+    // Aufgeklappte Baum-Nodes (DOM-basiert: .tree-toggle.open)
     var openNodes = [];
-    document.querySelectorAll('.tree-node.open').forEach(function (node) {
-      if (node.dataset.id) {
+    document.querySelectorAll('.tree-toggle.open').forEach(function (toggle) {
+      var node = toggle.closest('.tree-node');
+      if (node && node.dataset.id) {
         openNodes.push(node.dataset.id);
       }
     });
 
-    // Dateiart-Filter
-    var activeTypes = {};
-    document.querySelectorAll('.type-filter-cb').forEach(function (cb) {
-      if (cb.dataset.ext) {
-        activeTypes[cb.dataset.ext] = !!cb.checked;
+    // Dateiart-Filter: aus activeFileTypes (Set in index.html)
+    var activeTypes = [];
+    if (typeof activeFileTypes !== 'undefined' && activeFileTypes) {
+      if (activeFileTypes instanceof Set) {
+        activeFileTypes.forEach(function (t) { activeTypes.push(t); });
+      } else {
+        activeTypes = Object.keys(activeFileTypes);
       }
-    });
+    }
 
     // Suchfeld
     var searchInput = document.getElementById('searchInput');
     var searchText = searchInput ? searchInput.value : '';
+
+    // Scope-Toggle (Gesamten Explorer durchsuchen)
+    var scopeCheck = document.getElementById('searchScopeCheck');
+    var searchScope = scopeCheck ? scopeCheck.checked : false;
 
     return {
       projectId: typeof projectId !== 'undefined' ? projectId : null,
@@ -59,7 +64,8 @@
       checkedFolders: checkedFolders,
       openNodes: openNodes,
       activeTypes: activeTypes,
-      searchText: searchText
+      searchText: searchText,
+      searchScope: searchScope
     };
   }
 
@@ -74,6 +80,8 @@
       if (!state.projectId) return;
       // Nur speichern wenn der Baum existiert (mindestens 1 Node)
       if (document.querySelectorAll('.tree-node').length === 0) return;
+      // Nur speichern wenn mindestens 1 Ordner angehakt ist (sonst gibt es nichts wiederherzustellen)
+      if (state.checkedFolders.length === 0) return;
 
       sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     } catch (e) {
@@ -99,7 +107,7 @@
       }
 
       // projectId prüfen (muss mit aktuellem Projekt übereinstimmen)
-      if (typeof projectId !== 'undefined' && state.projectId !== projectId) {
+      if (typeof projectId !== 'undefined' && state.projectId && state.projectId !== projectId) {
         sessionStorage.removeItem(STORAGE_KEY);
         return null;
       }
@@ -116,22 +124,20 @@
   // 4. Wiederherstellen
   // =========================================================================
 
-  /**
-   * Stellt den gespeicherten Zustand wieder her.
-   * Muss aufgerufen werden NACHDEM der Baum gerendert ist.
-   */
   function restoreState(state) {
     console.log('[session-restore] Stelle Zustand wieder her...');
     console.log('[session-restore] Checked:', state.checkedFolders.length,
-      '| Open:', state.openNodes.length);
+      '| Open:', state.openNodes.length,
+      '| Types:', (state.activeTypes || []).join(','));
 
     // Gespeicherten Zustand verbrauchen
     sessionStorage.removeItem(STORAGE_KEY);
 
-    // --- a) Baum aufklappen (sequentiell, damit Eltern vor Kindern geladen) ---
-    // toggleTreeNode klappt lazy Unterordner auf, daher müssen wir warten
-    // bis jeder Node gerendert ist, bevor wir den nächsten aufklappen.
-    var openQueue = state.openNodes.slice();
+    // --- a) Dateiart-Filter ZUERST setzen (bevor Dateien geladen werden) ---
+    restoreFileTypes(state);
+
+    // --- b) Baum aufklappen (sequentiell, damit Eltern vor Kindern geladen) ---
+    var openQueue = (state.openNodes || []).slice();
 
     function openNext() {
       if (openQueue.length === 0) {
@@ -144,14 +150,14 @@
       var node = document.querySelector('.tree-node[data-id="' + id + '"]');
 
       if (node) {
+        var toggle = node.querySelector(':scope > .tree-row > .tree-toggle');
         // Nur aufklappen wenn noch nicht offen
-        if (!node.classList.contains('open')) {
-          if (typeof toggleTreeNode === 'function') {
-            toggleTreeNode(id);
-          }
+        if (toggle && !toggle.classList.contains('open')) {
+          // Simuliere Klick auf den Toggle (das triggert lazy-loading korrekt)
+          toggle.click();
         }
-        // Kurz warten damit lazy-loading abgeschlossen werden kann
-        setTimeout(openNext, 150);
+        // Warten damit lazy-loading abgeschlossen werden kann
+        setTimeout(openNext, 300);
       } else {
         // Node nicht gefunden (evtl. noch nicht geladen) → überspringen
         console.warn('[session-restore] Node nicht gefunden:', id);
@@ -162,141 +168,106 @@
     openNext();
   }
 
-  function restoreChecked(state) {
-    // --- b) Ordner anhaken ---
-    var checkQueue = state.checkedFolders.slice();
+  function restoreFileTypes(state) {
+    if (!state.activeTypes || state.activeTypes.length === 0) return;
 
-    function checkNext() {
-      if (checkQueue.length === 0) {
-        // Alle Ordner angehakt → Filter + Suche wiederherstellen
-        restoreFiltersAndSearch(state);
-        return;
-      }
-
-      var id = checkQueue.shift();
-      var node = document.querySelector('.tree-node[data-id="' + id + '"]');
-
-      if (node) {
-        var row = node.querySelector('.tree-row');
-        // Nur anhaken wenn noch nicht checked
-        if (row && !row.classList.contains('checked')) {
-          if (typeof checkTreeNode === 'function') {
-            checkTreeNode(id);
-          }
-        }
-        // loadFiles() wird durch checkTreeNode getriggert → kurz warten
-        setTimeout(checkNext, 300);
-      } else {
-        console.warn('[session-restore] Checked-Node nicht gefunden:', id);
-        setTimeout(checkNext, 50);
+    // activeFileTypes ist ein Set in index.html
+    if (typeof activeFileTypes !== 'undefined') {
+      if (activeFileTypes instanceof Set) {
+        activeFileTypes.clear();
+        state.activeTypes.forEach(function (t) { activeFileTypes.add(t); });
       }
     }
 
-    checkNext();
+    // UI aktualisieren
+    if (typeof updateFileTypeUI === 'function') {
+      updateFileTypeUI();
+    }
   }
 
-  function restoreFiltersAndSearch(state) {
-    // --- c) Dateiart-Filter setzen ---
-    if (state.activeTypes && Object.keys(state.activeTypes).length > 0) {
-      document.querySelectorAll('.type-filter-cb').forEach(function (cb) {
-        if (cb.dataset.ext && state.activeTypes.hasOwnProperty(cb.dataset.ext)) {
-          cb.checked = state.activeTypes[cb.dataset.ext];
-        }
+  function restoreChecked(state) {
+    // checkedFolderIds ist ein Set in index.html
+    if (typeof checkedFolderIds !== 'undefined' && checkedFolderIds instanceof Set) {
+      checkedFolderIds.clear();
+      state.checkedFolders.forEach(function (id) {
+        checkedFolderIds.add(id);
       });
-
-      // activeFileTypes-Objekt synchronisieren (falls es global existiert)
-      if (typeof activeFileTypes !== 'undefined') {
-        Object.keys(state.activeTypes).forEach(function (ext) {
-          if (state.activeTypes[ext]) {
-            activeFileTypes[ext] = true;
-          } else {
-            delete activeFileTypes[ext];
-          }
-        });
-      }
     }
 
-    // --- d) Suchfeld wiederherstellen ---
+    // DOM-Zustand aktualisieren: .tree-row.checked für alle angehakten Ordner
+    state.checkedFolders.forEach(function (id) {
+      var node = document.querySelector('.tree-node[data-id="' + id + '"]');
+      if (node) {
+        var row = node.querySelector(':scope > .tree-row');
+        if (row) row.classList.add('checked');
+      } else {
+        console.warn('[session-restore] Checked-Node nicht gefunden:', id);
+      }
+    });
+
+    // Anwenden-Button aktualisieren
+    if (typeof updateApplyBtn === 'function') {
+      updateApplyBtn();
+    }
+
+    // Dateien laden (wie "Anwenden" klicken)
+    console.log('[session-restore] Starte applyFolderFilter...');
+    if (typeof applyFolderFilter === 'function') {
+      // applyFolderFilter() nutzt checkedFolderIds → lädt die richtigen Ordner
+      applyFolderFilter().then(function () {
+        console.log('[session-restore] Dateien geladen. Stelle Suche wieder her...');
+        restoreSearch(state);
+      }).catch(function (err) {
+        console.warn('[session-restore] applyFolderFilter fehlgeschlagen:', err);
+      });
+    }
+  }
+
+  function restoreSearch(state) {
+    // Suchfeld wiederherstellen
     if (state.searchText) {
       var searchInput = document.getElementById('searchInput');
       if (searchInput) {
         searchInput.value = state.searchText;
-        // filterTable aufrufen um die Suche anzuwenden
-        if (typeof filterTable === 'function') {
-          setTimeout(function () {
-            filterTable();
-          }, 500);
-        }
       }
+    }
+
+    // Scope-Toggle wiederherstellen
+    if (state.searchScope) {
+      var scopeCheck = document.getElementById('searchScopeCheck');
+      if (scopeCheck) {
+        scopeCheck.checked = true;
+      }
+    }
+
+    // filterTable aufrufen um die Suche anzuwenden
+    if (state.searchText && typeof filterTable === 'function') {
+      setTimeout(function () {
+        filterTable();
+      }, 300);
     }
 
     console.log('[session-restore] Wiederherstellung abgeschlossen.');
   }
 
   // =========================================================================
-  // 5. Banner-Reload erweitern
+  // 5. Globale Funktion für manuelles Speichern
   // =========================================================================
 
-  /**
-   * Patcht den Session-Banner Reload-Button, damit vor dem Reload
-   * der Zustand gespeichert wird.
-   */
-  function patchReloadButton() {
-    // MutationObserver: Banner kann dynamisch eingefügt werden
-    var observer = new MutationObserver(function () {
-      // Suche nach dem Reload-Button im Session-Banner
-      var btn = document.querySelector('#session-expired-banner button') ||
-        document.querySelector('.session-banner button') ||
-        document.querySelector('[data-session-reload]');
-
-      if (!btn || btn._sessionRestorePatched) return;
-
-      btn._sessionRestorePatched = true;
-      var originalOnClick = btn.onclick;
-
-      btn.addEventListener('click', function (e) {
-        // Zustand sofort speichern BEVOR der Reload passiert
-        saveState();
-        console.log('[session-restore] Zustand vor Reload gespeichert.');
-      }, true); // capture phase → läuft VOR anderen Handlern
-
-      console.log('[session-restore] Reload-Button gepatcht.');
-    });
-
-    observer.observe(document.body, { childList: true, subtree: true });
-
-    // Auch vorhandene Buttons sofort prüfen
-    setTimeout(function () {
-      observer.disconnect(); // Re-trigger einmal
-      observer.observe(document.body, { childList: true, subtree: true });
-    }, 2000);
-  }
-
-  // =========================================================================
-  // 6. Globale Funktion für manuelles Speichern (z.B. aus viewer-v13.js)
-  // =========================================================================
-
-  /**
-   * Kann von anderen Modulen aufgerufen werden:
-   *   window.slSessionRestore.saveNow()
-   */
   window.slSessionRestore = {
     saveNow: saveState,
     collectState: collectState
   };
 
   // =========================================================================
-  // 7. Initialisierung
+  // 6. Initialisierung
   // =========================================================================
 
   function init() {
-    console.log('[session-restore] Modul geladen.');
+    console.log('[session-restore] Modul v2 geladen.');
 
     // Periodisches Speichern starten
     setInterval(saveState, SAVE_INTERVAL_MS);
-
-    // Banner-Reload-Button patchen
-    patchReloadButton();
 
     // Vor Unload ebenfalls speichern (Fallback)
     window.addEventListener('beforeunload', function () {
@@ -308,7 +279,9 @@
       var state = loadSavedState();
       if (state) {
         console.log('[session-restore] Gespeicherten Zustand gefunden von',
-          new Date(state.timestamp).toLocaleTimeString());
+          new Date(state.timestamp).toLocaleTimeString(),
+          '| Ordner:', state.checkedFolders.length,
+          '| Types:', (state.activeTypes || []).join(','));
         // Kurz warten bis der Baum initial gerendert ist
         waitForTree(function () {
           restoreState(state);
@@ -320,7 +293,7 @@
   }
 
   /**
-   * Wartet darauf, dass rootFolderId gesetzt ist (Extension ist initialisiert).
+   * Wartet darauf, dass rootFolderId und folderTree gesetzt sind.
    */
   function waitForReady(callback) {
     var attempts = 0;
@@ -328,12 +301,13 @@
 
     function check() {
       attempts++;
-      if (typeof rootFolderId !== 'undefined' && rootFolderId) {
+      if (typeof rootFolderId !== 'undefined' && rootFolderId &&
+          typeof folderTree !== 'undefined' && folderTree && folderTree.length > 0) {
         callback();
         return;
       }
       if (attempts >= maxAttempts) {
-        console.warn('[session-restore] Timeout: rootFolderId nicht verfügbar.');
+        console.warn('[session-restore] Timeout: rootFolderId/folderTree nicht verfügbar.');
         return;
       }
       setTimeout(check, 500);
@@ -352,7 +326,8 @@
     function check() {
       attempts++;
       if (document.querySelectorAll('.tree-node').length > 0) {
-        callback();
+        // Kurz extra warten damit der DOM stabil ist
+        setTimeout(callback, 200);
         return;
       }
       if (attempts >= maxAttempts) {
