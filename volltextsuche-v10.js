@@ -53,11 +53,13 @@
     });
   }
 
+  var _psetAvailable = false; // Flag ob PSet API verfügbar ist
+
   function ensureDefinition() {
     if (_defReady) return Promise.resolve(true);
     _libId = 'tcproject:prod:' + projectId;
     return psetFetch('/libs/' + _libId + '/defs/' + DEF_ID, 'GET').then(function(r) {
-      if (r.ok) { _defReady = true; return true; }
+      if (r.ok) { _defReady = true; _psetAvailable = true; return true; }
       return psetFetch('/libs/' + _libId + '/defs', 'POST', {
         id: DEF_ID, name: 'S+L PDF Volltext-Cache',
         schema: { open: true, props: {
@@ -66,9 +68,16 @@
           'extracted_at': { type: 'string', format: 'date-time' },
         }}
       }).then(function(r2) {
-        if (r2.ok || r2.status === 201) { _defReady = true; return true; }
-        return false;
+        if (r2.ok || r2.status === 201) { _defReady = true; _psetAvailable = true; return true; }
+        // PSet API nicht verfügbar (Lizenz fehlt) → trotzdem weitermachen
+        console.warn('[FTS] PSet API nicht verf\u00fcgbar (Lizenz?), arbeite ohne persistenten Cache');
+        _psetAvailable = false;
+        return true; // ← NICHT false! Indexierung soll weitergehen
       });
+    }).catch(function(e) {
+      console.warn('[FTS] PSet Fehler:', e.message, '→ arbeite ohne Cache');
+      _psetAvailable = false;
+      return true; // ← trotzdem weitermachen
     });
   }
 
@@ -159,7 +168,7 @@
       return Promise.resolve();
     }
 
-    return readPSetCache(fileId).then(function(cached) {
+    return (_psetAvailable ? readPSetCache(fileId) : Promise.resolve(null)).then(function(cached) {
       if (cached && cached.fulltext) {
         _ftsCache[fileId] = { text: cached.fulltext, pages: cached.page_count || 0, src: 'pset' };
         _progress.cached++;
@@ -168,11 +177,13 @@
       return extractText(fileId).then(function(result) {
         _ftsCache[fileId] = { text: result.text, pages: result.pages, src: 'extracted' };
         _progress.extracted++;
-        return writePSetCache(fileId, {
-          fulltext: result.text.substring(0, 1000000),
-          page_count: result.pages,
-          extracted_at: new Date().toISOString(),
-        });
+        if (_psetAvailable) {
+          return writePSetCache(fileId, {
+            fulltext: result.text.substring(0, 1000000),
+            page_count: result.pages,
+            extracted_at: new Date().toISOString(),
+          });
+        }
       });
     }).catch(function(e) {
       console.warn('[FTS] Fehler:', file.name, e.message);
