@@ -1418,8 +1418,14 @@ async function loadPsetDefId() {
       return null;
     }
     const defs = await res.json();
-    console.log('[S+L PSet] Defs gefunden:', defs.length, '| Namen:', defs.map(d => d.name).join(', '));
-    const def  = Array.isArray(defs) ? defs.find(d => d.name === PSET_DEFNAME) : null;
+    console.log('[S+L PSet] Defs Response Typ:', typeof defs, Array.isArray(defs) ? 'Array' : 'Objekt');
+    console.log('[S+L PSet] Defs Response:', JSON.stringify(defs).slice(0, 400));
+    // API gibt manchmal {list:[...]}, manchmal Array, manchmal {defs:[...]}
+    const defsArr = Array.isArray(defs) ? defs
+      : (defs.list || defs.defs || defs.items || defs.definitions
+         || Object.values(defs).find(v => Array.isArray(v)) || []);
+    console.log('[S+L PSet] Defs gefunden:', defsArr.length, '| Namen:', defsArr.map(d => d.name).join(', '));
+    const def  = defsArr.find(d => d.name === PSET_DEFNAME);
     psetDefId  = def?.id || null;
     console.log('[S+L PSet] DefId für', PSET_DEFNAME, ':', psetDefId);
   } catch (e) {
@@ -2919,7 +2925,7 @@ async function openFolderInTrimble(folderId, pathArr) {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v72 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v73 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
@@ -2947,7 +2953,7 @@ async function openFolderInTrimble(folderId, pathArr) {
   }
 })();
 </script>
-  <script src="volltextsuche-v10.js"></script>
+    <script src="volltextsuche-v10.js"></script>
   <script src="viewer-v13.js"></script>
   <script src="multi-download.js"></script>
   <script src="session-restore.js"></script>
