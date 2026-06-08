@@ -1445,22 +1445,27 @@ async function loadPset(versionId) {
     const libId = encodeURIComponent(`tcproject:prod:${projectId}`);
     const dId   = encodeURIComponent(defId);
     const url   = `${PSET_BASE}/psets/${link}/${libId}/${dId}`;
+    if (!window._psetUrlLogged) {
+      console.log('[S+L PSet] loadPset Beispiel-URL:', url);
+      window._psetUrlLogged = true;
+    }
     const res   = await fetch(url, {
       headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' }
     });
     if (!res.ok) {
-      if (res.status !== 404) {
-        console.warn('[S+L PSet] loadPset', versionId, 'Status:', res.status);
+      if (!window._psetErrorLogged) {
+        const txt = await res.text().catch(() => '');
+        console.warn('[S+L PSet] loadPset Status:', res.status, '| Body:', txt.slice(0, 200));
+        window._psetErrorLogged = true;
       }
       psetCache[versionId] = null;
       return null;
     }
     const data  = await res.json();
-    psetCache[versionId] = data.props || null;
-    if (!window._psetSampleLogged) {
-      console.log('[S+L PSet] Beispiel PSet:', JSON.stringify(data).slice(0, 300));
-      window._psetSampleLogged = true;
-    }
+    console.log('[S+L PSet] PSet Response Keys:', Object.keys(data).join(', '));
+    console.log('[S+L PSet] PSet Response:', JSON.stringify(data).slice(0, 400));
+    // Props können direkt oder unter data.props liegen
+    psetCache[versionId] = data.props || data.values || data || null;
   } catch (e) {
     console.warn('[S+L PSet] loadPset Fehler:', e.message);
     psetCache[versionId] = null;
@@ -2925,7 +2930,7 @@ async function openFolderInTrimble(folderId, pathArr) {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v73 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v74 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
