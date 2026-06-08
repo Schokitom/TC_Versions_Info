@@ -1399,7 +1399,8 @@ function updateFileTypeBadges(files) {
 const PSET_BASE    = 'https://pset-api.eu-west-1.connect.trimble.com/v1';
 const PSET_DEFNAME = 'sl-drawing-meta';
 let   psetDefId    = null;   // Definition-ID (einmalig geladen)
-const psetCache    = {};     // versionId → {revision, zeichnungsnr, ...} | null
+const psetCache    = {};     // versionId → props object | null (kein PSet) | undefined (nicht geladen)
+const psetPending  = new Set(); // versionIds die gerade geladen werden
 
 /** Definition-ID für sl-drawing-meta laden (einmalig, gecacht) */
 async function loadPsetDefId() {
@@ -1437,7 +1438,6 @@ async function loadPsetDefId() {
 /** PSet einer Datei lesen — gibt {revision, ...} oder null zurück */
 async function loadPset(versionId) {
   if (psetCache[versionId] !== undefined) return psetCache[versionId];
-  psetCache[versionId] = null; // Platzhalter (Lock)
   try {
     const defId = await loadPsetDefId();
     if (!defId) return null;
@@ -1449,11 +1449,11 @@ async function loadPset(versionId) {
       console.log('[S+L PSet] loadPset Beispiel-URL:', url);
       window._psetUrlLogged = true;
     }
-    const res   = await fetch(url, {
+    const res = await fetch(url, {
       headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' }
     });
     if (!res.ok) {
-      if (!window._psetErrorLogged) {
+      if (!window._psetErrorLogged && res.status !== 404) {
         const txt = await res.text().catch(() => '');
         console.warn('[S+L PSet] loadPset Status:', res.status, '| Body:', txt.slice(0, 200));
         window._psetErrorLogged = true;
@@ -1461,11 +1461,14 @@ async function loadPset(versionId) {
       psetCache[versionId] = null;
       return null;
     }
-    const data  = await res.json();
-    console.log('[S+L PSet] PSet Response Keys:', Object.keys(data).join(', '));
-    console.log('[S+L PSet] PSet Response:', JSON.stringify(data).slice(0, 400));
+    const data = await res.json();
+    if (!window._psetSampleLogged) {
+      console.log('[S+L PSet] PSet Response Keys:', Object.keys(data).join(', '));
+      console.log('[S+L PSet] PSet Sample:', JSON.stringify(data).slice(0, 300));
+      window._psetSampleLogged = true;
+    }
     // Props können direkt oder unter data.props liegen
-    psetCache[versionId] = data.props || data.values || data || null;
+    psetCache[versionId] = data.props || data.values || null;
   } catch (e) {
     console.warn('[S+L PSet] loadPset Fehler:', e.message);
     psetCache[versionId] = null;
@@ -1475,9 +1478,11 @@ async function loadPset(versionId) {
 
 /** Revision-Badge HTML erzeugen */
 function revBadgeHtml(versionId) {
+  if (!versionId || versionId === 'null' || versionId === 'undefined') {
+    return `<span class="rev-badge empty">–</span>`;
+  }
   const cached = psetCache[versionId];
   if (cached === undefined) {
-    // Noch nicht geladen — Platzhalter mit Lazy-Load
     return `<span class="rev-badge loading" id="rev-${versionId}" data-vid="${versionId}">…</span>`;
   }
   if (!cached || !cached.revision || cached.revision === '-') {
@@ -1486,27 +1491,50 @@ function revBadgeHtml(versionId) {
   return `<span class="rev-badge" title="Revision">${escHtml(cached.revision.toUpperCase())}</span>`;
 }
 
-/** Alle sichtbaren Revisions-Badges nachladen (Lazy) */
+/** Alle sichtbaren Revisions-Badges nachladen (Lazy, parallel) */
 async function lazyLoadRevisions() {
   const defId = await loadPsetDefId();
-  if (!defId) return; // Kein PSet-System vorhanden
+  if (!defId) {
+    console.warn('[S+L PSet] lazyLoadRevisions: keine DefId → abbruch');
+    return;
+  }
 
-  // Alle Platzhalter im DOM finden
   const pending = document.querySelectorAll('.rev-badge.loading[data-vid]');
-  for (const el of pending) {
-    const vid   = el.dataset.vid;
-    if (!vid || psetCache[vid] !== undefined) continue;
-    psetCache[vid] = null; // Lock
-    const props = await loadPset(vid);
-    // Badge aktualisieren falls noch im DOM
-    const current = document.getElementById(`rev-${vid}`);
-    if (current) {
-      if (!props || !props.revision || props.revision === '-') {
-        current.outerHTML = `<span class="rev-badge empty">–</span>`;
-      } else {
-        current.outerHTML = `<span class="rev-badge" title="Revision">${escHtml(props.revision.toUpperCase())}</span>`;
-      }
-    }
+  console.log('[S+L PSet] lazyLoadRevisions: Pending Badges:', pending.length);
+
+  // Unique versionIds sammeln (noch nicht geladen und nicht in Bearbeitung)
+  const vids = [...new Set(
+    [...pending]
+      .map(el => el.dataset.vid)
+      .filter(v => v && v !== 'null' && v !== 'undefined'
+                && psetCache[v] === undefined
+                && !psetPending.has(v))
+  )];
+
+  if (vids.length === 0) {
+    console.log('[S+L PSet] Alle Badges bereits geladen oder in Bearbeitung');
+    return;
+  }
+
+  console.log('[S+L PSet] Lade PSets für', vids.length, 'Dateien:', vids.slice(0,3).join(', '), vids.length > 3 ? '...' : '');
+
+  // Parallel laden (max 5 gleichzeitig)
+  const BATCH = 5;
+  for (let i = 0; i < vids.length; i += BATCH) {
+    const batch = vids.slice(i, i + BATCH);
+    await Promise.all(batch.map(async vid => {
+      psetPending.add(vid);
+      const props = await loadPset(vid);
+      psetPending.delete(vid);
+      // Alle Badges für diese versionId aktualisieren
+      document.querySelectorAll(`.rev-badge.loading[data-vid="${vid}"]`).forEach(el => {
+        if (!props || !props.revision || props.revision === '-') {
+          el.outerHTML = `<span class="rev-badge empty">–</span>`;
+        } else {
+          el.outerHTML = `<span class="rev-badge" title="Revision: ${escHtml(props.revision)}">${escHtml(props.revision.toUpperCase())}</span>`;
+        }
+      });
+    }));
   }
 }
 
@@ -2930,7 +2958,7 @@ async function openFolderInTrimble(folderId, pathArr) {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v74 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v75 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
@@ -2958,7 +2986,7 @@ async function openFolderInTrimble(folderId, pathArr) {
   }
 })();
 </script>
-  <script src="volltextsuche-v10.js"></script>
+    <script src="volltextsuche-v10.js"></script>
   <script src="viewer-v13.js"></script>
   <script src="multi-download.js"></script>
   <script src="session-restore.js"></script>
