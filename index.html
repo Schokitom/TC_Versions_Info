@@ -828,6 +828,26 @@
     td.versions-cell {
       text-align: center;
     }
+    td.revision-cell {
+      text-align: center;
+      font-family: var(--font);
+      font-size: 11px;
+    }
+    .rev-badge {
+      display: inline-flex; align-items: center; justify-content: center;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 2px 8px;
+      font-family: var(--font);
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--warning);
+      min-width: 28px;
+      cursor: default;
+    }
+    .rev-badge.empty { color: var(--muted); font-weight: 400; }
+    .rev-badge.loading { color: var(--muted); animation: pulse .8s ease-in-out infinite; }
     td.date-cell {
       font-family: var(--font);
       font-size: 11px;
@@ -1143,6 +1163,9 @@
         <th onclick="sortTable('versions')" id="th-versions" style="text-align:center">
           Versionen <span class="sort-icon">↕</span>
         </th>
+        <th onclick="sortTable('revision')" id="th-revision" style="text-align:center">
+          Rev <span class="sort-icon">↕</span>
+        </th>
         <th onclick="sortTable('path')" id="th-path">
           Pfad <span class="sort-icon">↕</span>
         </th>
@@ -1370,6 +1393,92 @@ function updateFileTypeBadges(files) {
 }
 
 
+// ─────────────────────────────────────────
+//  PSet — sl-drawing-meta (Revision)
+// ─────────────────────────────────────────
+const PSET_BASE    = 'https://pset-api.eu-west-1.connect.trimble.com/v1';
+const PSET_DEFNAME = 'sl-drawing-meta';
+let   psetDefId    = null;   // Definition-ID (einmalig geladen)
+const psetCache    = {};     // versionId → {revision, zeichnungsnr, ...} | null
+
+/** Definition-ID für sl-drawing-meta laden (einmalig, gecacht) */
+async function loadPsetDefId() {
+  if (psetDefId) return psetDefId;
+  try {
+    const libId = encodeURIComponent(`tcproject:prod:${projectId}`);
+    const res   = await fetch(`${PSET_BASE}/libs/${libId}/defs`, {
+      headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' }
+    });
+    if (!res.ok) return null;
+    const defs = await res.json();
+    const def  = Array.isArray(defs) ? defs.find(d => d.name === PSET_DEFNAME) : null;
+    psetDefId  = def?.id || null;
+    console.log('[S+L Explorer] PSet DefId:', psetDefId);
+  } catch (e) {
+    console.warn('[S+L Explorer] PSet DefId Fehler:', e.message);
+  }
+  return psetDefId;
+}
+
+/** PSet einer Datei lesen — gibt {revision, ...} oder null zurück */
+async function loadPset(versionId) {
+  if (psetCache[versionId] !== undefined) return psetCache[versionId];
+  psetCache[versionId] = null; // Platzhalter
+  try {
+    const defId = await loadPsetDefId();
+    if (!defId) return null;
+    const link  = encodeURIComponent(`frn:tcfile:${versionId}`);
+    const libId = encodeURIComponent(`tcproject:prod:${projectId}`);
+    const dId   = encodeURIComponent(defId);
+    const res   = await fetch(`${PSET_BASE}/psets/${link}/${libId}/${dId}`, {
+      headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' }
+    });
+    if (!res.ok) { psetCache[versionId] = null; return null; }
+    const data  = await res.json();
+    psetCache[versionId] = data.props || null;
+  } catch (e) {
+    psetCache[versionId] = null;
+  }
+  return psetCache[versionId];
+}
+
+/** Revision-Badge HTML erzeugen */
+function revBadgeHtml(versionId) {
+  const cached = psetCache[versionId];
+  if (cached === undefined) {
+    // Noch nicht geladen — Platzhalter mit Lazy-Load
+    return `<span class="rev-badge loading" id="rev-${versionId}" data-vid="${versionId}">…</span>`;
+  }
+  if (!cached || !cached.revision || cached.revision === '-') {
+    return `<span class="rev-badge empty">–</span>`;
+  }
+  return `<span class="rev-badge" title="Revision">${escHtml(cached.revision.toUpperCase())}</span>`;
+}
+
+/** Alle sichtbaren Revisions-Badges nachladen (Lazy) */
+async function lazyLoadRevisions() {
+  const defId = await loadPsetDefId();
+  if (!defId) return; // Kein PSet-System vorhanden
+
+  // Alle Platzhalter im DOM finden
+  const pending = document.querySelectorAll('.rev-badge.loading[data-vid]');
+  for (const el of pending) {
+    const vid   = el.dataset.vid;
+    if (!vid || psetCache[vid] !== undefined) continue;
+    psetCache[vid] = null; // Lock
+    const props = await loadPset(vid);
+    // Badge aktualisieren falls noch im DOM
+    const current = document.getElementById(`rev-${vid}`);
+    if (current) {
+      if (!props || !props.revision || props.revision === '-') {
+        current.outerHTML = `<span class="rev-badge empty">–</span>`;
+      } else {
+        current.outerHTML = `<span class="rev-badge" title="Revision">${escHtml(props.revision.toUpperCase())}</span>`;
+      }
+    }
+  }
+}
+
 async function collectFiles(folderId, folderPath, depth = 0, signal = null) {
   if (depth > 25) return [];
   if (signal?.aborted) return [];
@@ -1433,35 +1542,28 @@ async function downloadFile(idx, explicitVersionId) {
   const versionId = explicitVersionId || f.versionId || f.id;
   if (!versionId) { alert('Keine Datei-ID für Download verfügbar.'); return; }
 
-  const PROXY_URL = 'https://slproxy.schoknechtthomas.workers.dev';
-  const TC_BASE   = 'https://app21.connect.trimble.com';
-
   try {
-    // Schritt 1: Download-URL über Proxy holen
-    const res = await fetch(`${PROXY_URL}/core-fs/${versionId}/downloadurl?base=${TC_BASE}`, {
-      headers: { Authorization: `Bearer ${accessToken}` }
-    });
-    if (!res.ok) throw new Error(`Proxy HTTP ${res.status}`);
-    const data = await res.json();
-    if (!data.url) throw new Error('Keine Download-URL erhalten');
-
-    // Schritt 2: Datei von der vorsignierten URL laden
-    const fileRes = await fetch(data.url);
-    if (!fileRes.ok) throw new Error(`Download HTTP ${fileRes.status}`);
-    const blob = await fileRes.blob();
-
-    // Schritt 3: Download auslösen
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = f.name || 'download';
-    a.style.display = 'none';
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
+    // Hole Download-URL vom API (gibt 302 redirect oder {url: "..."} zurück)
+    const data = await tcGet(`/files/${versionId}/download`);
+    const dlUrl = typeof data === 'string' ? data : (data.url || data.downloadUrl || data.link || null);
+    if (dlUrl) {
+      const a = document.createElement('a');
+      a.href = dlUrl;
+      a.download = f.name || 'download';
+      a.target = '_blank';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } else {
+      // Fallback: direkte API-URL mit Token im Header ist nicht möglich per <a>,
+      // daher öffnen wir die Download-URL als neuen Tab
+      const fallbackUrl = `${tcApiBase}/files/${versionId}/download`;
+      window.open(fallbackUrl, '_blank');
+    }
   } catch (err) {
     console.error('[S+L Explorer] Download-Fehler:', err);
-    alert('Download fehlgeschlagen: ' + err.message);
+    // Fallback: API-URL direkt öffnen
+    window.open(`${tcApiBase}/files/${versionId}/download`, '_blank');
   }
 }
 
@@ -2073,10 +2175,15 @@ async function loadFiles() {
 // ─────────────────────────────────────────
 function getFileValue(f, key) {
   switch (key) {
-    case 'name': return (f.name || '').toLowerCase();
+    case 'name':       return (f.name || '').toLowerCase();
     case 'modifiedBy': return getModifiedBy(f).toLowerCase();
     case 'modifiedAt': return getModifiedAt(f);
-    case 'versions': return f._versionCount || 1;
+    case 'versions':   return f._versionCount || 1;
+    case 'revision': {
+      const vid = getFileId(f);
+      const p   = vid ? psetCache[vid] : null;
+      return (p?.revision || '').toLowerCase();
+    }
     case 'path': return (f._path || '').toLowerCase();
     default: return '';
   }
@@ -2173,6 +2280,7 @@ function renderTable() {
           ${versions}
         </span>
       </td>
+      <td class="revision-cell">${revBadgeHtml(fileId)}</td>
       <td class="path-cell" title="${escHtml(path)}">
         <a class="path-link" href="#"
            onclick="event.preventDefault(); openFolderInTrimble('${escHtml(f.parentId || rootFolderId)}','${encodeURIComponent(JSON.stringify(f.path||[]))}')"
@@ -2199,7 +2307,7 @@ function renderTable() {
   }
 
   // Sort indicators
-  ['name','modifiedBy','modifiedAt','versions','path'].forEach(k => {
+  ['name','modifiedBy','modifiedAt','versions','revision','path'].forEach(k => {
     const th = document.getElementById(`th-${k}`);
     if (!th) return;
     if (k === sortKey) {
@@ -2210,6 +2318,9 @@ function renderTable() {
       th.querySelector('.sort-icon').textContent = ' ↕';
     }
   });
+
+  // Revisions lazy nachladen (non-blocking)
+  setTimeout(() => lazyLoadRevisions(), 100);
 }
 
 function sortTable(key) {
@@ -2357,6 +2468,7 @@ function renderSearchResults() {
       <td class="versions-cell">
         <span class="version-badge" ${verCall ? `onclick="${verCall}"` : ''} title="Versionen">${versions}</span>
       </td>
+      <td class="revision-cell">${revBadgeHtml(fileId)}</td>
       <td class="path-cell" title="${escHtml(path)}">
         <a class="path-link" href="#"
            onclick="event.preventDefault(); openFolderInTrimble('${escHtml(f.parentId || rootFolderId)}','${encodeURIComponent(JSON.stringify(f.path||[]))}')"
@@ -2381,6 +2493,8 @@ function renderSearchResults() {
     `;
     tbody.appendChild(tr);
   }
+  // Revisions lazy nachladen
+  setTimeout(() => lazyLoadRevisions(), 100);
 }
 
 // Öffnet eine Datei direkt per ID (wenn nicht in allFiles)
@@ -2394,34 +2508,19 @@ async function openFileById(fileId, fileName) {
 }
 
 async function downloadFileById(fileId, fileName) {
-  const PROXY_URL = 'https://slproxy.schoknechtthomas.workers.dev';
-  const TC_BASE   = 'https://app21.connect.trimble.com';
-
   try {
-    const res = await fetch(`${PROXY_URL}/core-fs/${fileId}/downloadurl?base=${TC_BASE}`, {
-      headers: { Authorization: `Bearer ${accessToken}` }
-    });
-    if (!res.ok) throw new Error(`Proxy HTTP ${res.status}`);
-    const data = await res.json();
-    if (!data.url) throw new Error('Keine Download-URL erhalten');
-
-    const fileRes = await fetch(data.url);
-    if (!fileRes.ok) throw new Error(`Download HTTP ${fileRes.status}`);
-    const blob = await fileRes.blob();
-
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = fileName || 'download';
-    a.style.display = 'none';
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
-  } catch (err) {
-    console.error('[S+L Explorer] Download-Fehler:', err);
-    alert('Download fehlgeschlagen: ' + err.message);
-  }
+    const data = await tcGet(`/files/${fileId}/download`);
+    const dlUrl = typeof data === 'string' ? data : (data.url || data.downloadUrl || null);
+    if (dlUrl) {
+      const a = document.createElement('a');
+      a.href = dlUrl; a.download = fileName; a.target = '_blank';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    } else {
+      window.open(`${tcApiBase}/files/${fileId}/download`, '_blank');
+    }
+  } catch { window.open(`${tcApiBase}/files/${fileId}/download`, '_blank'); }
 }
+
 // ─────────────────────────────────────────
 //  Path dropdown
 // ─────────────────────────────────────────
@@ -2800,75 +2899,26 @@ async function openFolderInTrimble(folderId, pathArr) {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v70 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v71 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
-
-    // Versuch 1: requestPermission
-    try {
-      const tokenResult = await API.extension.requestPermission('accesstoken');
-      if (tokenResult && tokenResult !== 'pending' && tokenResult !== 'denied') {
-        accessToken = tokenResult;
-        console.log('[S+L Explorer] Token via requestPermission erhalten');
-      }
-    } catch (e) {
-      console.warn('[S+L Explorer] requestPermission Fehler:', e.message);
+    const tokenResult = await API.extension.requestPermission('accesstoken');
+    if (tokenResult && tokenResult !== 'pending' && tokenResult !== 'denied') {
+      accessToken = tokenResult;
     }
 
-    // Versuch 2: Warte auf Event (bis zu 10 Sekunden, mit Fortschrittsanzeige)
+    // Wait briefly for token event if still pending
     if (!accessToken) {
-      console.log('[S+L Explorer] Warte auf Token via Event...');
-      setLoadingMsg('Warte auf Zugriffstoken… (Bitte Berechtigung erteilen falls Popup erscheint)');
-
-      var tokenWaitAttempts = 0;
-      var maxAttempts = 10; // 10 x 1 Sekunde = 10 Sekunden
-
-      while (!accessToken && tokenWaitAttempts < maxAttempts) {
-        await new Promise(function(r) { setTimeout(r, 1000); });
-        tokenWaitAttempts++;
-        setLoadingMsg('Warte auf Zugriffstoken… (' + tokenWaitAttempts + '/' + maxAttempts + 's)');
-
-        // Versuche nochmal requestPermission (manchmal klappt es beim 2. Mal)
-        if (tokenWaitAttempts === 3 || tokenWaitAttempts === 6) {
-          try {
-            var retry = await API.extension.requestPermission('accesstoken');
-            if (retry && retry !== 'pending' && retry !== 'denied') {
-              accessToken = retry;
-              console.log('[S+L Explorer] Token via Retry erhalten (Versuch ' + tokenWaitAttempts + ')');
-            }
-          } catch (e) { /* ignore */ }
-        }
-      }
-    }
-
-    // Versuch 3: Direkt den Token aus dem Workspace API Event-System holen
-    if (!accessToken) {
-      console.log('[S+L Explorer] Letzter Versuch: getAccessToken...');
-      try {
-        // Manche Workspace API Versionen haben getAccessToken
-        if (API.extension && typeof API.extension.getAccessToken === 'function') {
-          var directToken = await API.extension.getAccessToken();
-          if (directToken) {
-            accessToken = directToken;
-            console.log('[S+L Explorer] Token via getAccessToken erhalten');
-          }
-        }
-      } catch (e) { /* ignore */ }
+      await new Promise(r => setTimeout(r, 2000));
     }
 
     if (!accessToken) {
-      throw new Error(
-        'Kein Zugriffstoken erhalten.\n\n' +
-        'Mögliche Lösungen:\n' +
-        '1. Seite neu laden (Strg+F5)\n' +
-        '2. Einstellungen → Erweiterungen → S+L Explorer → Berechtigung zurücksetzen\n' +
-        '3. Aus Trimble Connect abmelden und neu anmelden\n' +
-        '4. Browser-Cache leeren (Strg+Shift+Delete)'
-      );
+      throw new Error('Kein Zugriffstoken erhalten. Bitte Berechtigungen in den Extension-Einstellungen erlauben.');
     }
 
     await loadFiles();
+
   } catch (err) {
     console.error('Init error:', err);
     document.getElementById('errorMessage').textContent = err.message || String(err);
