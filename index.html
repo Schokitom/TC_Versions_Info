@@ -1406,14 +1406,22 @@ async function loadPsetDefId() {
   if (psetDefId) return psetDefId;
   try {
     const libId = encodeURIComponent(`tcproject:prod:${projectId}`);
-    const res   = await fetch(`${PSET_BASE}/libs/${libId}/defs`, {
+    const url   = `${PSET_BASE}/libs/${libId}/defs`;
+    console.log('[S+L PSet] loadPsetDefId URL:', url);
+    const res   = await fetch(url, {
       headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' }
     });
-    if (!res.ok) return null;
+    console.log('[S+L PSet] loadPsetDefId Status:', res.status);
+    if (!res.ok) {
+      const txt = await res.text().catch(() => '');
+      console.warn('[S+L PSet] loadPsetDefId Fehler:', txt.slice(0, 200));
+      return null;
+    }
     const defs = await res.json();
+    console.log('[S+L PSet] Defs gefunden:', defs.length, '| Namen:', defs.map(d => d.name).join(', '));
     const def  = Array.isArray(defs) ? defs.find(d => d.name === PSET_DEFNAME) : null;
     psetDefId  = def?.id || null;
-    console.log('[S+L Explorer] PSet DefId:', psetDefId);
+    console.log('[S+L PSet] DefId für', PSET_DEFNAME, ':', psetDefId);
   } catch (e) {
     console.warn('[S+L Explorer] PSet DefId Fehler:', e.message);
   }
@@ -1423,20 +1431,32 @@ async function loadPsetDefId() {
 /** PSet einer Datei lesen — gibt {revision, ...} oder null zurück */
 async function loadPset(versionId) {
   if (psetCache[versionId] !== undefined) return psetCache[versionId];
-  psetCache[versionId] = null; // Platzhalter
+  psetCache[versionId] = null; // Platzhalter (Lock)
   try {
     const defId = await loadPsetDefId();
     if (!defId) return null;
     const link  = encodeURIComponent(`frn:tcfile:${versionId}`);
     const libId = encodeURIComponent(`tcproject:prod:${projectId}`);
     const dId   = encodeURIComponent(defId);
-    const res   = await fetch(`${PSET_BASE}/psets/${link}/${libId}/${dId}`, {
+    const url   = `${PSET_BASE}/psets/${link}/${libId}/${dId}`;
+    const res   = await fetch(url, {
       headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' }
     });
-    if (!res.ok) { psetCache[versionId] = null; return null; }
+    if (!res.ok) {
+      if (res.status !== 404) {
+        console.warn('[S+L PSet] loadPset', versionId, 'Status:', res.status);
+      }
+      psetCache[versionId] = null;
+      return null;
+    }
     const data  = await res.json();
     psetCache[versionId] = data.props || null;
+    if (!window._psetSampleLogged) {
+      console.log('[S+L PSet] Beispiel PSet:', JSON.stringify(data).slice(0, 300));
+      window._psetSampleLogged = true;
+    }
   } catch (e) {
+    console.warn('[S+L PSet] loadPset Fehler:', e.message);
     psetCache[versionId] = null;
   }
   return psetCache[versionId];
@@ -2899,7 +2919,7 @@ async function openFolderInTrimble(folderId, pathArr) {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v71 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v72 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
