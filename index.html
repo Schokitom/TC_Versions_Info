@@ -848,6 +848,66 @@
     }
     .rev-badge.empty { color: var(--muted); font-weight: 400; }
     .rev-badge.loading { color: var(--muted); animation: pulse .8s ease-in-out infinite; }
+
+    /* ── Revision Info-Tooltip ── */
+    .rev-info-wrap {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      justify-content: center;
+    }
+    .rev-info-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 13px; height: 13px;
+      border-radius: 50%;
+      background: var(--border);
+      color: var(--muted);
+      font-size: 8px;
+      font-weight: 700;
+      font-family: var(--font-ui);
+      cursor: pointer;
+      border: none;
+      line-height: 1;
+      position: relative;
+      flex-shrink: 0;
+      transition: background .15s;
+    }
+    .rev-info-btn:hover { background: var(--accent2); color: #fff; }
+    .rev-info-tooltip {
+      display: none;
+      position: absolute;
+      bottom: calc(100% + 6px);
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--surface);
+      border: 1px solid var(--accent2);
+      border-radius: 6px;
+      padding: 8px 10px;
+      font-size: 11px;
+      font-family: var(--font-ui);
+      color: var(--text);
+      width: 240px;
+      z-index: 50;
+      box-shadow: 0 4px 16px rgba(0,0,0,.4);
+      line-height: 1.5;
+      white-space: normal;
+      font-weight: 400;
+      text-transform: none;
+      letter-spacing: 0;
+    }
+    .rev-info-tooltip::after {
+      content: '';
+      position: absolute;
+      top: 100%;
+      left: 50%;
+      transform: translateX(-50%);
+      border: 5px solid transparent;
+      border-top-color: var(--accent2);
+    }
+    .rev-info-btn:hover .rev-info-tooltip,
+    .rev-info-btn:focus .rev-info-tooltip { display: block; }
     td.date-cell {
       font-family: var(--font);
       font-size: 11px;
@@ -1164,7 +1224,15 @@
           Versionen <span class="sort-icon">↕</span>
         </th>
         <th onclick="sortTable('revision')" id="th-revision" style="text-align:center">
-          Rev <span class="sort-icon">↕</span>
+          <div class="rev-info-wrap">
+            Rev <span class="sort-icon">↕</span>
+            <button class="rev-info-btn" onclick="event.stopPropagation()" tabindex="0">
+              i
+              <div class="rev-info-tooltip">
+                Das <b>/</b> bedeutet, dass keine Informationen in die Metadaten geschrieben wurden! Die Datei kann trotzdem eine Revision enthalten. Zur Zeit schreibt nur Tekla diese Informationen in die Datei. Bei externen Dateien kann diese Spalte ignoriert werden!
+              </div>
+            </button>
+          </div>
         </th>
         <th onclick="sortTable('path')" id="th-path">
           Pfad <span class="sort-icon">↕</span>
@@ -1408,69 +1476,39 @@ async function loadPsetDefId() {
   try {
     const libId = encodeURIComponent(`tcproject:prod:${projectId}`);
     const url   = `${PSET_BASE}/libs/${libId}/defs`;
-    console.log('[S+L PSet] loadPsetDefId URL:', url);
     const res   = await fetch(url, {
       headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' }
     });
-    console.log('[S+L PSet] loadPsetDefId Status:', res.status);
-    if (!res.ok) {
-      const txt = await res.text().catch(() => '');
-      console.warn('[S+L PSet] loadPsetDefId Fehler:', txt.slice(0, 200));
-      return null;
-    }
-    const defs = await res.json();
-    console.log('[S+L PSet] Defs Response Typ:', typeof defs, Array.isArray(defs) ? 'Array' : 'Objekt');
-    console.log('[S+L PSet] Defs Response:', JSON.stringify(defs).slice(0, 400));
-    // API gibt manchmal {list:[...]}, manchmal Array, manchmal {defs:[...]}
+    if (!res.ok) return null;
+    const defs    = await res.json();
     const defsArr = Array.isArray(defs) ? defs
-      : (defs.list || defs.defs || defs.items || defs.definitions
+      : (defs.items || defs.list || defs.defs
          || Object.values(defs).find(v => Array.isArray(v)) || []);
-    console.log('[S+L PSet] Defs gefunden:', defsArr.length, '| Namen:', defsArr.map(d => d.name).join(', '));
     const def  = defsArr.find(d => d.name === PSET_DEFNAME);
     psetDefId  = def?.id || null;
-    console.log('[S+L PSet] DefId für', PSET_DEFNAME, ':', psetDefId);
+    console.log('[S+L PSet] DefId:', psetDefId, '| Definitionen:', defsArr.map(d => d.name).join(', '));
   } catch (e) {
-    console.warn('[S+L Explorer] PSet DefId Fehler:', e.message);
+    console.warn('[S+L PSet] loadPsetDefId Fehler:', e.message);
   }
   return psetDefId;
 }
 
-/** PSet einer Datei lesen — gibt {revision, ...} oder null zurück */
+/** PSet einer Datei lesen */
 async function loadPset(versionId) {
   if (psetCache[versionId] !== undefined) return psetCache[versionId];
   try {
     const defId = await loadPsetDefId();
-    if (!defId) return null;
+    if (!defId) { psetCache[versionId] = null; return null; }
     const link  = encodeURIComponent(`frn:tcfile:${versionId}`);
     const libId = encodeURIComponent(`tcproject:prod:${projectId}`);
     const dId   = encodeURIComponent(defId);
-    const url   = `${PSET_BASE}/psets/${link}/${libId}/${dId}`;
-    if (!window._psetUrlLogged) {
-      console.log('[S+L PSet] loadPset Beispiel-URL:', url);
-      window._psetUrlLogged = true;
-    }
-    const res = await fetch(url, {
+    const res   = await fetch(`${PSET_BASE}/psets/${link}/${libId}/${dId}`, {
       headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' }
     });
-    if (!res.ok) {
-      if (!window._psetErrorLogged && res.status !== 404) {
-        const txt = await res.text().catch(() => '');
-        console.warn('[S+L PSet] loadPset Status:', res.status, '| Body:', txt.slice(0, 200));
-        window._psetErrorLogged = true;
-      }
-      psetCache[versionId] = null;
-      return null;
-    }
+    if (!res.ok) { psetCache[versionId] = null; return null; } // 404 = noch kein PSet
     const data = await res.json();
-    if (!window._psetSampleLogged) {
-      console.log('[S+L PSet] PSet Response Keys:', Object.keys(data).join(', '));
-      console.log('[S+L PSet] PSet Sample:', JSON.stringify(data).slice(0, 300));
-      window._psetSampleLogged = true;
-    }
-    // Props können direkt oder unter data.props liegen
     psetCache[versionId] = data.props || data.values || null;
   } catch (e) {
-    console.warn('[S+L PSet] loadPset Fehler:', e.message);
     psetCache[versionId] = null;
   }
   return psetCache[versionId];
@@ -1479,14 +1517,14 @@ async function loadPset(versionId) {
 /** Revision-Badge HTML erzeugen */
 function revBadgeHtml(versionId) {
   if (!versionId || versionId === 'null' || versionId === 'undefined') {
-    return `<span class="rev-badge empty">–</span>`;
+    return `<span class="rev-badge empty" title="Kein PSet vorhanden">/</span>`;
   }
   const cached = psetCache[versionId];
   if (cached === undefined) {
     return `<span class="rev-badge loading" id="rev-${versionId}" data-vid="${versionId}">…</span>`;
   }
   if (!cached || !cached.revision || cached.revision === '-') {
-    return `<span class="rev-badge empty">–</span>`;
+    return `<span class="rev-badge empty" title="Kein PSet vorhanden">/</span>`;
   }
   return `<span class="rev-badge" title="Revision">${escHtml(cached.revision.toUpperCase())}</span>`;
 }
@@ -1500,9 +1538,7 @@ async function lazyLoadRevisions() {
   }
 
   const pending = document.querySelectorAll('.rev-badge.loading[data-vid]');
-  console.log('[S+L PSet] lazyLoadRevisions: Pending Badges:', pending.length);
 
-  // Unique versionIds sammeln (noch nicht geladen und nicht in Bearbeitung)
   const vids = [...new Set(
     [...pending]
       .map(el => el.dataset.vid)
@@ -1511,12 +1547,7 @@ async function lazyLoadRevisions() {
                 && !psetPending.has(v))
   )];
 
-  if (vids.length === 0) {
-    console.log('[S+L PSet] Alle Badges bereits geladen oder in Bearbeitung');
-    return;
-  }
-
-  console.log('[S+L PSet] Lade PSets für', vids.length, 'Dateien:', vids.slice(0,3).join(', '), vids.length > 3 ? '...' : '');
+  if (vids.length === 0) return;
 
   // Parallel laden (max 5 gleichzeitig)
   const BATCH = 5;
@@ -1529,7 +1560,7 @@ async function lazyLoadRevisions() {
       // Alle Badges für diese versionId aktualisieren
       document.querySelectorAll(`.rev-badge.loading[data-vid="${vid}"]`).forEach(el => {
         if (!props || !props.revision || props.revision === '-') {
-          el.outerHTML = `<span class="rev-badge empty">–</span>`;
+          el.outerHTML = `<span class="rev-badge empty" title="Kein PSet vorhanden">/</span>`;
         } else {
           el.outerHTML = `<span class="rev-badge" title="Revision: ${escHtml(props.revision)}">${escHtml(props.revision.toUpperCase())}</span>`;
         }
@@ -2715,7 +2746,6 @@ async function openVersionModal(idx, fileName) {
     });
 
     const rows = versions.map((v, i) => {
-      // Confirmed fields from Trimble API: id, versionId, createdBy{firstName,lastName,email}, createdOn, modifiedOn, size, revision
       const vId        = v.versionId || v.id;
       const versionNum = v.revision || (versions.length - i);
       const createdAt  = formatDate(v.createdOn || v.modifiedOn || '');
@@ -2729,6 +2759,7 @@ async function openVersionModal(idx, fileName) {
           <td class="date-cell">${createdAt}</td>
           <td class="user-cell" style="font-size:12px">${escHtml(createdBy)}</td>
           <td style="font-family:var(--font);font-size:11px;color:var(--muted)">${size}</td>
+          <td class="revision-cell">${revBadgeHtml(vId)}</td>
           <td style="text-align:center;white-space:nowrap;display:flex;gap:4px;justify-content:center">
             <button class="ver-open-btn" onclick="openFile(${idx},'${vId}')" title="Diese Version im Viewer öffnen">
               <svg viewBox="0 0 24 24"><path d="M19 19H5V5h7V3H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/></svg>
@@ -2751,11 +2782,15 @@ async function openVersionModal(idx, fileName) {
             <th>Datum</th>
             <th>Erstellt von</th>
             <th>Größe</th>
+            <th style="text-align:center">Rev</th>
             <th>Öffnen / DL</th>
           </tr>
         </thead>
         <tbody>${rows}</tbody>
       </table>`;
+
+    // Revisions in der Versions-Tabelle lazy nachladen
+    setTimeout(() => lazyLoadRevisions(), 50);
   } catch (err) {
     document.getElementById('modalBody').innerHTML =
       `<div class="modal-loading">Fehler: ${escHtml(err.message)}</div>`;
@@ -2958,7 +2993,7 @@ async function openFolderInTrimble(folderId, pathArr) {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v75 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v77 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
