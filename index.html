@@ -860,11 +860,11 @@
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 13px; height: 13px;
+      width: 14px; height: 14px;
       border-radius: 50%;
-      background: var(--border);
-      color: var(--muted);
-      font-size: 8px;
+      background: var(--accent2);
+      color: #fff;
+      font-size: 9px;
       font-weight: 700;
       font-family: var(--font-ui);
       cursor: pointer;
@@ -874,40 +874,28 @@
       flex-shrink: 0;
       transition: background .15s;
     }
-    .rev-info-btn:hover { background: var(--accent2); color: #fff; }
+    .rev-info-btn:hover { background: var(--accent); }
     .rev-info-tooltip {
       display: none;
-      position: absolute;
-      bottom: calc(100% + 6px);
-      left: 50%;
-      transform: translateX(-50%);
+      position: fixed;
       background: var(--surface);
-      border: 1px solid var(--accent2);
+      border: 1px solid var(--accent);
       border-radius: 6px;
-      padding: 8px 10px;
+      padding: 10px 12px;
       font-size: 11px;
       font-family: var(--font-ui);
       color: var(--text);
-      width: 240px;
-      z-index: 50;
-      box-shadow: 0 4px 16px rgba(0,0,0,.4);
-      line-height: 1.5;
+      width: 260px;
+      z-index: 9999;
+      box-shadow: 0 6px 24px rgba(0,0,0,.6);
+      line-height: 1.6;
       white-space: normal;
       font-weight: 400;
       text-transform: none;
       letter-spacing: 0;
+      pointer-events: none;
     }
-    .rev-info-tooltip::after {
-      content: '';
-      position: absolute;
-      top: 100%;
-      left: 50%;
-      transform: translateX(-50%);
-      border: 5px solid transparent;
-      border-top-color: var(--accent2);
-    }
-    .rev-info-btn:hover .rev-info-tooltip,
-    .rev-info-btn:focus .rev-info-tooltip { display: block; }
+    .rev-info-btn:hover .rev-info-tooltip { display: block; }
     td.date-cell {
       font-family: var(--font);
       font-size: 11px;
@@ -1226,12 +1214,11 @@
         <th onclick="sortTable('revision')" id="th-revision" style="text-align:center">
           <div class="rev-info-wrap">
             Rev <span class="sort-icon">↕</span>
-            <button class="rev-info-btn" onclick="event.stopPropagation()" tabindex="0">
-              i
-              <div class="rev-info-tooltip">
-                Das <b>/</b> bedeutet, dass keine Informationen in die Metadaten geschrieben wurden! Die Datei kann trotzdem eine Revision enthalten. Zur Zeit schreibt nur Tekla diese Informationen in die Datei. Bei externen Dateien kann diese Spalte ignoriert werden!
-              </div>
-            </button>
+            <button class="rev-info-btn"
+                    onclick="event.stopPropagation()"
+                    onmouseenter="showRevTooltip(this)"
+                    onmouseleave="hideRevTooltip()"
+                    tabindex="0">i</button>
           </div>
         </th>
         <th onclick="sortTable('path')" id="th-path">
@@ -1268,6 +1255,19 @@
 </div>
 
 </div><!-- end content-split -->
+
+<!-- Global Revision Info Tooltip -->
+<div id="revTooltipEl" style="
+  display:none; position:fixed; z-index:9999;
+  background:var(--surface); border:1px solid var(--accent);
+  border-radius:6px; padding:10px 12px;
+  font-size:11px; font-family:var(--font-ui); color:var(--text);
+  width:260px; line-height:1.6;
+  box-shadow:0 6px 24px rgba(0,0,0,.6);
+  pointer-events:none;
+">
+  Das <b>/</b> bedeutet, dass keine Informationen in die Metadaten geschrieben wurden! Die Datei kann trotzdem eine Revision enthalten. Zur Zeit schreibt nur Tekla diese Informationen in die Datei. Bei externen Dateien kann diese Spalte ignoriert werden!
+</div>
 
 <!-- Version Modal -->
 <div class="modal-overlay hidden" id="versionModal" onclick="closeVersionModal(event)">
@@ -1493,7 +1493,7 @@ async function loadPsetDefId() {
   return psetDefId;
 }
 
-/** PSet einer Datei lesen */
+/** PSet einer Datei-Version lesen — jede versionId hat ihr eigenes PSet */
 async function loadPset(versionId) {
   if (psetCache[versionId] !== undefined) return psetCache[versionId];
   try {
@@ -1505,8 +1505,8 @@ async function loadPset(versionId) {
     const res   = await fetch(`${PSET_BASE}/psets/${link}/${libId}/${dId}`, {
       headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' }
     });
-    if (!res.ok) { psetCache[versionId] = null; return null; } // 404 = noch kein PSet
-    const data = await res.json();
+    if (!res.ok) { psetCache[versionId] = null; return null; }
+    const data  = await res.json();
     psetCache[versionId] = data.props || data.values || null;
   } catch (e) {
     psetCache[versionId] = null;
@@ -2846,6 +2846,25 @@ function formatDate(iso) {
   } catch { return iso; }
 }
 
+function showRevTooltip(btn) {
+  const el   = document.getElementById('revTooltipEl');
+  if (!el) return;
+  const rect = btn.getBoundingClientRect();
+  el.style.display = 'block';
+  // Position: unter dem Button, zentriert
+  const tipW = 260;
+  let left = rect.left + rect.width / 2 - tipW / 2;
+  // Rand-Clipping verhindern
+  left = Math.max(8, Math.min(left, window.innerWidth - tipW - 8));
+  el.style.left = left + 'px';
+  el.style.top  = (rect.bottom + 6) + 'px';
+}
+
+function hideRevTooltip() {
+  const el = document.getElementById('revTooltipEl');
+  if (el) el.style.display = 'none';
+}
+
 function escHtml(str) {
   return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
@@ -2993,7 +3012,7 @@ async function openFolderInTrimble(folderId, pathArr) {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v77 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v79 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
