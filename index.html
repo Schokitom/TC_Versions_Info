@@ -2723,6 +2723,7 @@ function buildPathDropdown() {
 
 function renderPathOptions(paths, filter) {
   const list = document.getElementById('pathOptionsList');
+  if (!list) return;
   list.innerHTML = '';
   const filtered = filter ? paths.filter(p => p.toLowerCase().includes(filter.toLowerCase())) : paths;
   for (const path of filtered) {
@@ -2751,9 +2752,7 @@ function togglePath(path) {
   else selectedPaths.add(path);
   updatePathFilterUI();
   renderTable();
-  // Re-render options to update checkboxes
-  const searchVal = document.getElementById('pathSearch')?.value || '';
-  filterPathOptions(searchVal);
+  filterPathOptions(document.getElementById('pathSearch')?.value || '');
 }
 
 function selectAllPaths() {
@@ -2775,29 +2774,22 @@ function updatePathFilterUI() {
   const label = document.getElementById('pathFilterLabel');
   const btn   = document.getElementById('pathFilterBtn');
   const count = selectedPaths.size;
-  if (count === 0) {
-    badge.style.display = 'none';
-    label.textContent = 'Pfad filtern';
-    btn.classList.remove('active');
-  } else {
-    badge.style.display = 'inline-block';
-    badge.textContent = count;
-    label.textContent = count === 1 ? '1 Pfad' : `${count} Pfade`;
-    btn.classList.add('active');
-  }
+  if (badge) { badge.style.display = count === 0 ? 'none' : 'inline-block'; if (count > 0) badge.textContent = count; }
+  if (label) label.textContent = count === 0 ? 'Pfad filtern' : (count === 1 ? '1 Pfad' : `${count} Pfade`);
+  if (btn)   btn.classList.toggle('active', count > 0);
 }
 
 function togglePathDropdown() {
   const dd = document.getElementById('pathDropdown');
+  if (!dd) return;
   const isOpen = !dd.classList.contains('hidden');
   if (isOpen) {
     dd.classList.add('hidden');
   } else {
     dd.classList.remove('hidden');
-    document.getElementById('pathSearch').value = '';
+    const ps = document.getElementById('pathSearch');
+    if (ps) { ps.value = ''; setTimeout(() => ps.focus(), 50); }
     buildPathDropdown();
-    // Focus search
-    setTimeout(() => document.getElementById('pathSearch').focus(), 50);
   }
 }
 
@@ -3224,7 +3216,7 @@ async function openFolderInTrimble(folderId, pathArr) {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v81 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v82 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
