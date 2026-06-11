@@ -526,9 +526,9 @@
     .col-filter-btn {
       display: inline-flex; align-items: center; justify-content: center;
       width: 16px; height: 16px;
-      border: 1px solid transparent;
-      background: none;
-      color: var(--muted);
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--accent);
       cursor: pointer;
       font-size: 10px;
       line-height: 1;
@@ -538,13 +538,12 @@
       vertical-align: middle;
       transition: all .15s;
       flex-shrink: 0;
-      /* Reset Vererbung vom th */
       text-transform: none;
       letter-spacing: 0;
       font-weight: 400;
     }
-    .col-filter-btn:hover { color: var(--accent); border-color: var(--accent); background: var(--row-hover); }
-    .col-filter-btn.active { color: var(--warning); border-color: var(--warning); }
+    .col-filter-btn:hover { border-color: var(--accent); background: var(--accent2); color: #fff; }
+    .col-filter-btn.active { color: var(--warning); border-color: var(--warning); background: rgba(245,158,11,.12); }
     .col-filter-dropdown {
       position: fixed;
       background: var(--surface);
@@ -1168,24 +1167,6 @@
   </label>
 
   <!-- Path filter dropdown -->
-  <div class="path-filter-wrap" id="pathFilterWrap">
-    <div class="path-filter-btn" id="pathFilterBtn" onclick="togglePathDropdown()">
-      <svg viewBox="0 0 24 24"><path d="M10 18h4v-2h-4v2zM3 6v2h18V6H3zm3 7h12v-2H6v2z"/></svg>
-      <span id="pathFilterLabel">Pfad filtern</span>
-      <span class="path-filter-badge" id="pathFilterBadge" style="display:none">0</span>
-      <svg viewBox="0 0 24 24" id="pathFilterChevron" style="margin-left:2px"><path d="M7 10l5 5 5-5z"/></svg>
-    </div>
-    <div class="path-dropdown hidden" id="pathDropdown">
-      <div class="path-dropdown-search">
-        <input type="text" placeholder="Pfad suchen…" oninput="filterPathOptions(this.value)" id="pathSearch" />
-      </div>
-      <div class="path-dropdown-actions">
-        <button onclick="selectAllPaths()">Alle auswählen</button>
-        <button onclick="clearAllPaths()">Alle abwählen</button>
-      </div>
-      <div class="path-dropdown-list" id="pathOptionsList"></div>
-    </div>
-  </div>
 
   <div class="stat-pill">Gesamt: <span id="totalCount">0</span></div>
   <button class="btn primary" onclick="loadFiles()">
@@ -3243,7 +3224,7 @@ async function openFolderInTrimble(folderId, pathArr) {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v80 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v81 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
