@@ -521,6 +521,83 @@
     thead th.sorted { color: var(--accent); }
     thead th.sorted .sort-icon { opacity: 1; }
 
+    /* ── Spalten-Filter ── */
+    .col-filter-btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 13px; height: 13px;
+      border: none; background: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 10px;
+      line-height: 1;
+      padding: 0;
+      border-radius: 2px;
+      margin-left: 3px;
+      vertical-align: middle;
+      transition: color .15s;
+      flex-shrink: 0;
+    }
+    .col-filter-btn:hover, .col-filter-btn.active { color: var(--accent); }
+    .col-filter-btn.active { color: var(--warning); }
+    .col-filter-dropdown {
+      position: fixed;
+      background: var(--surface);
+      border: 1px solid var(--accent2);
+      border-radius: 8px;
+      box-shadow: 0 8px 32px rgba(0,0,0,.55);
+      z-index: 9999;
+      min-width: 220px;
+      max-width: 340px;
+      max-height: 320px;
+      display: flex; flex-direction: column;
+      overflow: hidden;
+    }
+    .col-filter-search {
+      padding: 7px 9px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .col-filter-search input {
+      width: 100%; background: var(--bg); border: 1px solid var(--border);
+      border-radius: 4px; padding: 4px 8px; font-size: 12px;
+      color: var(--text); font-family: var(--font-ui); outline: none;
+    }
+    .col-filter-search input:focus { border-color: var(--accent); }
+    .col-filter-actions {
+      display: flex; gap: 5px; padding: 5px 9px;
+      border-bottom: 1px solid var(--border); flex-shrink: 0;
+    }
+    .col-filter-actions button {
+      flex: 1; background: var(--bg); border: 1px solid var(--border);
+      border-radius: 4px; padding: 3px 6px; font-size: 11px;
+      color: var(--muted); cursor: pointer; font-family: var(--font-ui);
+      transition: all .15s;
+    }
+    .col-filter-actions button:hover { border-color: var(--accent); color: var(--accent); }
+    .col-filter-list {
+      overflow-y: auto; flex: 1; padding: 3px 0;
+    }
+    .col-filter-list::-webkit-scrollbar { width: 4px; }
+    .col-filter-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+    .col-filter-item {
+      display: flex; align-items: center; gap: 7px;
+      padding: 5px 10px; cursor: pointer;
+      font-size: 12px; color: var(--text);
+      transition: background .1s;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .col-filter-item:hover { background: var(--row-hover); }
+    .col-filter-item.checked { color: var(--accent); }
+    .col-filter-item .cf-check {
+      width: 13px; height: 13px; flex-shrink: 0;
+      border: 1.5px solid var(--border); border-radius: 3px;
+      display: flex; align-items: center; justify-content: center;
+      transition: all .15s;
+    }
+    .col-filter-item.checked .cf-check { background: var(--accent); border-color: var(--accent); }
+    .col-filter-item .cf-check svg { width: 8px; height: 8px; fill: #000; }
+    .col-filter-item .cf-label { overflow: hidden; text-overflow: ellipsis; flex: 1; }
+
     tbody tr {
       border-bottom: 1px solid var(--border);
       transition: background .1s;
@@ -690,6 +767,7 @@
     .file-icon-img   { background: linear-gradient(135deg, #3b82f6, #1d4ed8); }
     .file-icon-3d    { background: linear-gradient(135deg, #f59e0b, #b45309); }
     .file-icon-dwg   { background: linear-gradient(135deg, #a855f7, #7e22ce); }
+    .file-icon-dstv  { background: linear-gradient(135deg, #f97316, #c2410c); }
     .file-icon-other { background: linear-gradient(135deg, #6b7280, #374151); }
     td.path-cell {
       font-family: var(--font);
@@ -1185,6 +1263,11 @@
         <span>Excel (XLS / XLSX)</span>
         <span class="filetype-badge" id="badge-xls">–</span>
       </div>
+      <div class="filetype-row" data-type="dstv" onclick="toggleFileType('dstv')">
+        <div class="filetype-check"><svg viewBox="0 0 12 12"><path d="M2 6l3 3 5-5" stroke="#000" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        <span>DSTV (NC1 / NC)</span>
+        <span class="filetype-badge" id="badge-dstv">–</span>
+      </div>
       <div class="filetype-row" data-type="other" onclick="toggleFileType('other')">
         <div class="filetype-check"><svg viewBox="0 0 12 12"><path d="M2 6l3 3 5-5" stroke="#000" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
         <span>Sonstige</span>
@@ -1199,17 +1282,17 @@
   <table id="fileTable">
     <thead>
       <tr>
-        <th onclick="sortTable('name')" id="th-name">
-          Name <span class="sort-icon">↕</span>
+        <th id="th-name">
+          <span onclick="sortTable('name')" style="cursor:pointer">Name <span class="sort-icon">↕</span></span><button class="col-filter-btn" id="cfbtn-name" onclick="event.stopPropagation();toggleColFilter('name',this)" title="Name filtern"><svg viewBox="0 0 12 12" width="8" height="8" fill="currentColor"><path d="M1 3h10M3 6h6M5 9h2"/></svg></button>
         </th>
-        <th onclick="sortTable('modifiedBy')" id="th-modifiedBy">
-          Geändert von <span class="sort-icon">↕</span>
+        <th id="th-modifiedBy">
+          <span onclick="sortTable('modifiedBy')" style="cursor:pointer">Geändert von <span class="sort-icon">↕</span></span><button class="col-filter-btn" id="cfbtn-modifiedBy" onclick="event.stopPropagation();toggleColFilter('modifiedBy',this)" title="Geändert von filtern"><svg viewBox="0 0 12 12" width="8" height="8" fill="currentColor"><path d="M1 3h10M3 6h6M5 9h2"/></svg></button>
         </th>
-        <th onclick="sortTable('modifiedAt')" id="th-modifiedAt">
-          Letzte Änderung <span class="sort-icon">↕</span>
+        <th id="th-modifiedAt">
+          <span onclick="sortTable('modifiedAt')" style="cursor:pointer">Letzte Änderung <span class="sort-icon">↕</span></span><button class="col-filter-btn" id="cfbtn-modifiedAt" onclick="event.stopPropagation();toggleColFilter('modifiedAt',this)" title="Letzte Änderung filtern"><svg viewBox="0 0 12 12" width="8" height="8" fill="currentColor"><path d="M1 3h10M3 6h6M5 9h2"/></svg></button>
         </th>
-        <th onclick="sortTable('versions')" id="th-versions" style="text-align:center">
-          Versionen <span class="sort-icon">↕</span>
+        <th id="th-versions" style="text-align:center">
+          <span onclick="sortTable('versions')" style="cursor:pointer">Versionen <span class="sort-icon">↕</span></span><button class="col-filter-btn" id="cfbtn-versions" onclick="event.stopPropagation();toggleColFilter('versions',this)" title="Versionen filtern"><svg viewBox="0 0 12 12" width="8" height="8" fill="currentColor"><path d="M1 3h10M3 6h6M5 9h2"/></svg></button>
         </th>
         <th onclick="sortTable('revision')" id="th-revision" style="text-align:center">
           <div class="rev-info-wrap">
@@ -1221,8 +1304,8 @@
                     tabindex="0">i</button>
           </div>
         </th>
-        <th onclick="sortTable('path')" id="th-path">
-          Pfad <span class="sort-icon">↕</span>
+        <th id="th-path">
+          <span onclick="sortTable('path')" style="cursor:pointer">Pfad <span class="sort-icon">↕</span></span><button class="col-filter-btn" id="cfbtn-path" onclick="event.stopPropagation();toggleColFilter('path',this)" title="Pfad filtern"><svg viewBox="0 0 12 12" width="8" height="8" fill="currentColor"><path d="M1 3h10M3 6h6M5 9h2"/></svg></button>
         </th>
         <th class="actions-th" style="text-align:center;width:80px">Aktionen</th>
       </tr>
@@ -1255,6 +1338,18 @@
 </div>
 
 </div><!-- end content-split -->
+
+<!-- Global Column Filter Dropdown -->
+<div id="colFilterDropdown" style="display:none" class="col-filter-dropdown">
+  <div class="col-filter-search">
+    <input type="text" id="colFilterSearch" placeholder="Suchen…" oninput="renderColFilterItems()" />
+  </div>
+  <div class="col-filter-actions">
+    <button onclick="colFilterSelectAll()">Alle</button>
+    <button onclick="colFilterClearAll()">Keine</button>
+  </div>
+  <div class="col-filter-list" id="colFilterList"></div>
+</div>
 
 <!-- Global Revision Info Tooltip -->
 <div id="revTooltipEl" style="
@@ -1316,6 +1411,7 @@ const FILE_TYPES = {
   '3d':  { exts: ['stp', 'step', 'ifc', 'iges', 'igs', 'obj', 'fbx', 'nwc', 'nwd', 'rvt', 'skp'] },
   img:   { exts: ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'tiff', 'tif', 'webp', 'svg', 'heic', 'heif'] },
   xls:   { exts: ['xls', 'xlsx', 'xlsm', 'xlsb', 'csv', 'ods'] },
+  dstv:  { exts: ['nc1', 'nc'] },
   other: { exts: [] } // alle übrigen
 };
 // Aktive Filter — initial nur PDF
@@ -1418,7 +1514,7 @@ function getFileType(fileName) {
 
 function getFileIconHtml(fileName) {
   const type = getFileType(fileName);
-  const labels = { pdf: 'PDF', xls: 'XLS', img: 'IMG', '3d': '3D', dwg: 'DWG', other: '···' };
+  const labels = { pdf: 'PDF', xls: 'XLS', img: 'IMG', '3d': '3D', dwg: 'DWG', dstv: 'NC', other: '···' };
   const cls    = `file-icon file-icon-${type}`;
   return `<div class="${cls}">${labels[type] || '···'}</div>`;
 }
@@ -1448,7 +1544,7 @@ function updateFileTypeUI() {
 
 function updateFileTypeBadges(files) {
   // Zähle Dateien pro Typ aus dem gesamten baseFiles-Pool
-  const counts = { pdf: 0, dwg: 0, '3d': 0, img: 0, xls: 0, other: 0 };
+  const counts = { pdf: 0, dwg: 0, '3d': 0, img: 0, xls: 0, dstv: 0, other: 0 };
   for (const f of files) {
     const t = getFileType(f.name);
     if (counts[t] !== undefined) counts[t]++;
@@ -1515,7 +1611,12 @@ async function loadPset(versionId) {
 }
 
 /** Revision-Badge HTML erzeugen */
-function revBadgeHtml(versionId) {
+// Akzeptiert entweder ein File-Objekt f oder direkt eine versionId (für Versions-Modal)
+function revBadgeHtml(fOrVid) {
+  // Wenn ein File-Objekt übergeben wird, versionId bevorzugen (Makro schreibt PSets an versionId)
+  const versionId = (fOrVid && typeof fOrVid === 'object')
+    ? (fOrVid.versionId || fOrVid.id || null)
+    : fOrVid;
   if (!versionId || versionId === 'null' || versionId === 'undefined') {
     return `<span class="rev-badge empty" title="Kein PSet vorhanden">/</span>`;
   }
@@ -1526,7 +1627,7 @@ function revBadgeHtml(versionId) {
   if (!cached || !cached.revision || cached.revision === '-') {
     return `<span class="rev-badge empty" title="Kein PSet vorhanden">/</span>`;
   }
-  return `<span class="rev-badge" title="Revision">${escHtml(cached.revision.toUpperCase())}</span>`;
+  return `<span class="rev-badge" title="Revision: ${escHtml(cached.revision)}">${escHtml(cached.revision.toUpperCase())}</span>`;
 }
 
 /** Alle sichtbaren Revisions-Badges nachladen (Lazy, parallel) */
@@ -2263,6 +2364,12 @@ async function loadFiles() {
 // ─────────────────────────────────────────
 //  Table rendering
 // ─────────────────────────────────────────
+// Gibt die ID zurück die für PSets verwendet wird = versionId (nicht fileId!)
+// Das Makro schreibt PSets an frn:tcfile:{versionId}
+function getRevisionId(f) {
+  return f.versionId || f.id || null;
+}
+
 function getFileValue(f, key) {
   switch (key) {
     case 'name':       return (f.name || '').toLowerCase();
@@ -2270,7 +2377,7 @@ function getFileValue(f, key) {
     case 'modifiedAt': return getModifiedAt(f);
     case 'versions':   return f._versionCount || 1;
     case 'revision': {
-      const vid = getFileId(f);
+      const vid = getRevisionId(f);
       const p   = vid ? psetCache[vid] : null;
       return (p?.revision || '').toLowerCase();
     }
@@ -2310,6 +2417,15 @@ function renderTable() {
     if (selectedPaths.size > 0) {
       const path = f._path || '/';
       if (!selectedPaths.has(path)) return false;
+    }
+    // Spaltenfilter
+    for (const [col, active] of Object.entries(colFilters)) {
+      if (!active || active.size === 0) return false; // alle abgewählt
+      const allVals = new Set((baseFiles.length > 0 ? baseFiles : allFiles).map(x => getColValue(x, col)));
+      if (active.size < allVals.size) { // nur filtern wenn eingeschränkt
+        const val = getColValue(f, col);
+        if (!active.has(val)) return false;
+      }
     }
     return true;
   });
@@ -2370,7 +2486,7 @@ function renderTable() {
           ${versions}
         </span>
       </td>
-      <td class="revision-cell">${revBadgeHtml(fileId)}</td>
+      <td class="revision-cell">${revBadgeHtml(f)}</td>
       <td class="path-cell" title="${escHtml(path)}">
         <a class="path-link" href="#"
            onclick="event.preventDefault(); openFolderInTrimble('${escHtml(f.parentId || rootFolderId)}','${encodeURIComponent(JSON.stringify(f.path||[]))}')"
@@ -2558,7 +2674,7 @@ function renderSearchResults() {
       <td class="versions-cell">
         <span class="version-badge" ${verCall ? `onclick="${verCall}"` : ''} title="Versionen">${versions}</span>
       </td>
-      <td class="revision-cell">${revBadgeHtml(fileId)}</td>
+      <td class="revision-cell">${revBadgeHtml(f)}</td>
       <td class="path-cell" title="${escHtml(path)}">
         <a class="path-link" href="#"
            onclick="event.preventDefault(); openFolderInTrimble('${escHtml(f.parentId || rootFolderId)}','${encodeURIComponent(JSON.stringify(f.path||[]))}')"
@@ -2864,6 +2980,117 @@ function hideRevTooltip() {
   const el = document.getElementById('revTooltipEl');
   if (el) el.style.display = 'none';
 }
+
+// ─────────────────────────────────────────
+//  Spalten-Filter
+// ─────────────────────────────────────────
+let colFilters = {};       // { colKey: Set of active values } — leer = alle anzeigen
+let _cfActiveCol = null;   // aktiv geöffnete Spalte
+let _cfAllValues = [];     // alle eindeutigen Werte der aktiven Spalte
+
+function getColValue(f, col) {
+  switch (col) {
+    case 'name':       return f.name || '–';
+    case 'modifiedBy': return getModifiedBy(f);
+    case 'modifiedAt': return formatDate(getModifiedAt(f));
+    case 'versions':   return String(f._versionCount || 1);
+    case 'path':       return f._path || '/';
+    default: return '';
+  }
+}
+
+function toggleColFilter(col, btn) {
+  const dd = document.getElementById('colFilterDropdown');
+  // Schließen wenn selbe Spalte nochmal geklickt
+  if (_cfActiveCol === col && dd.style.display !== 'none') {
+    closeColFilter(); return;
+  }
+  _cfActiveCol = col;
+
+  // Alle eindeutigen Werte aus baseFiles sammeln
+  const pool = baseFiles.length > 0 ? baseFiles : allFiles;
+  const vals = [...new Set(pool.map(f => getColValue(f, col)))].sort((a,b) => a.localeCompare(b, 'de'));
+  _cfAllValues = vals;
+
+  // Wenn kein Filter aktiv → alle vorauswählen
+  if (!colFilters[col]) colFilters[col] = new Set(vals);
+
+  // Dropdown positionieren
+  const rect = btn.getBoundingClientRect();
+  dd.style.display = 'flex';
+  const ddW = 240;
+  let left = rect.left;
+  if (left + ddW > window.innerWidth - 8) left = window.innerWidth - ddW - 8;
+  dd.style.left = left + 'px';
+  dd.style.top  = (rect.bottom + 4) + 'px';
+
+  document.getElementById('colFilterSearch').value = '';
+  renderColFilterItems();
+  setTimeout(() => document.getElementById('colFilterSearch').focus(), 50);
+}
+
+function renderColFilterItems() {
+  const list    = document.getElementById('colFilterList');
+  const search  = (document.getElementById('colFilterSearch')?.value || '').toLowerCase();
+  const active  = colFilters[_cfActiveCol] || new Set(_cfAllValues);
+  const check   = `<svg viewBox="0 0 12 12"><path d="M2 6l3 3 5-5" stroke="#000" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+
+  list.innerHTML = '';
+  const filtered = search ? _cfAllValues.filter(v => v.toLowerCase().includes(search)) : _cfAllValues;
+  for (const val of filtered) {
+    const isChk = active.has(val);
+    const div = document.createElement('div');
+    div.className = 'col-filter-item' + (isChk ? ' checked' : '');
+    div.innerHTML = `<div class="cf-check">${isChk ? check : ''}</div><span class="cf-label" title="${escHtml(val)}">${escHtml(val)}</span>`;
+    div.onclick = () => {
+      if (active.has(val)) active.delete(val); else active.add(val);
+      colFilters[_cfActiveCol] = active;
+      renderColFilterItems();
+      updateColFilterBtn(_cfActiveCol);
+      renderTable();
+    };
+    list.appendChild(div);
+  }
+}
+
+function colFilterSelectAll() {
+  colFilters[_cfActiveCol] = new Set(_cfAllValues);
+  renderColFilterItems();
+  updateColFilterBtn(_cfActiveCol);
+  renderTable();
+}
+
+function colFilterClearAll() {
+  colFilters[_cfActiveCol] = new Set();
+  renderColFilterItems();
+  updateColFilterBtn(_cfActiveCol);
+  renderTable();
+}
+
+function updateColFilterBtn(col) {
+  const btn = document.getElementById(`cfbtn-${col}`);
+  if (!btn) return;
+  const pool = baseFiles.length > 0 ? baseFiles : allFiles;
+  const allVals = new Set(pool.map(f => getColValue(f, col)));
+  const active  = colFilters[col];
+  // Aktiv (eingeschränkt) wenn nicht alle Werte ausgewählt
+  const isFiltered = active && active.size < allVals.size;
+  btn.classList.toggle('active', !!isFiltered);
+}
+
+function closeColFilter() {
+  document.getElementById('colFilterDropdown').style.display = 'none';
+  _cfActiveCol = null;
+}
+
+// Klick außerhalb schließt Dropdown
+document.addEventListener('click', e => {
+  const dd = document.getElementById('colFilterDropdown');
+  if (!dd || dd.style.display === 'none') return;
+  if (!dd.contains(e.target) && !e.target.classList.contains('col-filter-btn')) {
+    closeColFilter();
+  }
+});
 
 function escHtml(str) {
   return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
