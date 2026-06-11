@@ -511,12 +511,13 @@
       letter-spacing: 0.08em;
       text-transform: uppercase;
       color: var(--muted);
-      cursor: pointer;
+      cursor: default;
       user-select: none;
       white-space: nowrap;
       transition: color .15s;
     }
-    thead th:hover { color: var(--accent); }
+    thead th span[onclick] { cursor: pointer; }
+    thead th span[onclick]:hover { color: var(--accent); }
     thead th .sort-icon { margin-left: 4px; opacity: .4; }
     thead th.sorted { color: var(--accent); }
     thead th.sorted .sort-icon { opacity: 1; }
@@ -524,21 +525,26 @@
     /* ── Spalten-Filter ── */
     .col-filter-btn {
       display: inline-flex; align-items: center; justify-content: center;
-      width: 13px; height: 13px;
-      border: none; background: none;
+      width: 16px; height: 16px;
+      border: 1px solid transparent;
+      background: none;
       color: var(--muted);
       cursor: pointer;
       font-size: 10px;
       line-height: 1;
       padding: 0;
-      border-radius: 2px;
-      margin-left: 3px;
+      border-radius: 3px;
+      margin-left: 4px;
       vertical-align: middle;
-      transition: color .15s;
+      transition: all .15s;
       flex-shrink: 0;
+      /* Reset Vererbung vom th */
+      text-transform: none;
+      letter-spacing: 0;
+      font-weight: 400;
     }
-    .col-filter-btn:hover, .col-filter-btn.active { color: var(--accent); }
-    .col-filter-btn.active { color: var(--warning); }
+    .col-filter-btn:hover { color: var(--accent); border-color: var(--accent); background: var(--row-hover); }
+    .col-filter-btn.active { color: var(--warning); border-color: var(--warning); }
     .col-filter-dropdown {
       position: fixed;
       background: var(--surface);
@@ -925,7 +931,6 @@
       cursor: default;
     }
     .rev-badge.empty { color: var(--muted); font-weight: 400; }
-    .rev-badge.loading { color: var(--muted); animation: pulse .8s ease-in-out infinite; }
 
     /* ── Revision Info-Tooltip ── */
     .rev-info-wrap {
@@ -1613,33 +1618,32 @@ async function loadPset(versionId) {
 /** Revision-Badge HTML erzeugen */
 // Akzeptiert entweder ein File-Objekt f oder direkt eine versionId (für Versions-Modal)
 function revBadgeHtml(fOrVid) {
-  // Wenn ein File-Objekt übergeben wird, versionId bevorzugen (Makro schreibt PSets an versionId)
   const versionId = (fOrVid && typeof fOrVid === 'object')
     ? (fOrVid.versionId || fOrVid.id || null)
     : fOrVid;
   if (!versionId || versionId === 'null' || versionId === 'undefined') {
-    return `<span class="rev-badge empty" title="Kein PSet vorhanden">/</span>`;
+    return `<span class="rev-badge empty" title="Keine ID">/</span>`;
   }
   const cached = psetCache[versionId];
   if (cached === undefined) {
-    return `<span class="rev-badge loading" id="rev-${versionId}" data-vid="${versionId}">…</span>`;
+    // Noch nicht geladen — zeige sofort / (kein Blinken), wird nach Laden aktualisiert
+    return `<span class="rev-badge empty" id="rev-${versionId}" data-vid="${versionId}" title="Wird geladen…">/</span>`;
   }
-  if (!cached || !cached.revision || cached.revision === '-') {
+  if (cached === null) {
+    // PSet nicht vorhanden
     return `<span class="rev-badge empty" title="Kein PSet vorhanden">/</span>`;
   }
-  return `<span class="rev-badge" title="Revision: ${escHtml(cached.revision)}">${escHtml(cached.revision.toUpperCase())}</span>`;
+  // PSet vorhanden — Revision anzeigen (auch "-")
+  const rev = cached.revision ?? '/';
+  return `<span class="rev-badge${rev === '/' || rev === '' ? ' empty' : ''}" title="Revision: ${escHtml(rev)}">${escHtml(rev.toUpperCase())}</span>`;
 }
 
-/** Alle sichtbaren Revisions-Badges nachladen (Lazy, parallel) */
+/** Alle Revisions-Badges nachladen die noch nicht geladen wurden */
 async function lazyLoadRevisions() {
   const defId = await loadPsetDefId();
-  if (!defId) {
-    console.warn('[S+L PSet] lazyLoadRevisions: keine DefId → abbruch');
-    return;
-  }
+  if (!defId) return;
 
-  const pending = document.querySelectorAll('.rev-badge.loading[data-vid]');
-
+  const pending = document.querySelectorAll('[data-vid]');
   const vids = [...new Set(
     [...pending]
       .map(el => el.dataset.vid)
@@ -1650,7 +1654,6 @@ async function lazyLoadRevisions() {
 
   if (vids.length === 0) return;
 
-  // Parallel laden (max 5 gleichzeitig)
   const BATCH = 5;
   for (let i = 0; i < vids.length; i += BATCH) {
     const batch = vids.slice(i, i + BATCH);
@@ -1659,11 +1662,12 @@ async function lazyLoadRevisions() {
       const props = await loadPset(vid);
       psetPending.delete(vid);
       // Alle Badges für diese versionId aktualisieren
-      document.querySelectorAll(`.rev-badge.loading[data-vid="${vid}"]`).forEach(el => {
-        if (!props || !props.revision || props.revision === '-') {
+      document.querySelectorAll(`[data-vid="${vid}"]`).forEach(el => {
+        if (props === null) {
           el.outerHTML = `<span class="rev-badge empty" title="Kein PSet vorhanden">/</span>`;
         } else {
-          el.outerHTML = `<span class="rev-badge" title="Revision: ${escHtml(props.revision)}">${escHtml(props.revision.toUpperCase())}</span>`;
+          const rev = props.revision ?? '/';
+          el.outerHTML = `<span class="rev-badge${rev === '/' || rev === '' ? ' empty' : ''}" title="Revision: ${escHtml(rev)}">${escHtml(rev.toUpperCase())}</span>`;
         }
       });
     }));
@@ -3239,7 +3243,7 @@ async function openFolderInTrimble(folderId, pathArr) {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v79 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v80 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
