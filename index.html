@@ -1712,24 +1712,44 @@ function getFileId(f) {
  * Direkter Download einer Datei via Trimble API.
  * GET /files/{versionId}/download → Redirect zur Download-URL
  */
+const DL_PROXY_URL = 'https://slproxy.schoknechtthomas.workers.dev';
+const DL_TC_BASE   = 'https://app21.connect.trimble.com';
+
+/** Holt eine Datei über den Proxy-Worker (wie multi-download.js) und gibt sie als Blob zurück */
+async function fetchFileBlobViaProxy(fileId, token) {
+  const res = await fetch(`${DL_PROXY_URL}/core-fs/${fileId}/downloadurl?base=${DL_TC_BASE}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  if (!res.ok) throw new Error(`Proxy HTTP ${res.status}`);
+  const data = await res.json();
+  if (!data.url) throw new Error('Keine Download-URL erhalten');
+  const fileRes = await fetch(data.url);
+  if (!fileRes.ok) throw new Error(`Download HTTP ${fileRes.status}`);
+  return fileRes.blob();
+}
+
+function triggerBlobDownload(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
+}
+
 async function downloadFile(idx, explicitVersionId) {
   const f = allFiles[idx];
   if (!f) return;
-  const versionId = explicitVersionId || f.versionId || f.id;
-  if (!versionId) { alert('Keine Datei-ID für Download verfügbar.'); return; }
+  const fileId = explicitVersionId || getFileId(f);
+  if (!fileId) { alert('Keine Datei-ID für Download verfügbar.'); return; }
 
-  // Der API-Endpunkt /downloadurl blockiert CORS für unsere Domain.
-  // Daher nutzen wir Trimbles eigene Viewer-Seite, die einen nativen
-  // Download-Button enthält — das läuft komplett auf Trimble-Infrastruktur.
-  const persistentId = f._persistentFileId || await getPersistentFileId(versionId);
-  if (persistentId) f._persistentFileId = persistentId;
-
-  const url = persistentId
-    ? `https://web.connect.trimble.com/projects/${projectId}/viewer/2D?id=${persistentId}&version=${versionId}&type=revisions&etag=${versionId}`
-    : `https://web.connect.trimble.com/projects/${projectId}/viewer/2D?id=${versionId}&version=${versionId}&type=revisions&etag=${versionId}`;
-
-  console.log('[S+L Explorer] Öffne Trimble Viewer für Download:', f.name);
-  window.open(url, '_blank');
+  try {
+    const blob = await fetchFileBlobViaProxy(fileId, accessToken);
+    triggerBlobDownload(blob, f.name || 'download');
+  } catch (err) {
+    console.error('[S+L Explorer] Download-Fehler:', err);
+    alert('Download fehlgeschlagen: ' + err.message);
+  }
 }
 
 // ─────────────────────────────────────────
@@ -2477,7 +2497,7 @@ function renderTable() {
           </button>
           <button class="dl-btn"
                   ${hasId ? `onclick="downloadFile(${idx})"` : 'disabled style="opacity:.3;cursor:default"'}
-                  title="In Trimble Viewer öffnen zum Herunterladen">
+                  title="Datei herunterladen">
             <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M5 20h14v-2H5v2zm7-14v8.17l-2.59-2.58L8 13l4 4 4-4-1.41-1.41L13 14.17V6h-1z"/></svg>
           </button>
         </div>
@@ -2665,7 +2685,7 @@ function renderSearchResults() {
           </button>
           <button class="dl-btn"
                   ${dlCall ? `onclick="${dlCall}"` : 'disabled style="opacity:.3;cursor:default"'}
-                  title="In Trimble Viewer öffnen zum Herunterladen">
+                  title="Datei herunterladen">
             <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M5 20h14v-2H5v2zm7-14v8.17l-2.59-2.58L8 13l4 4 4-4-1.41-1.41L13 14.17V6h-1z"/></svg>
           </button>
         </div>
@@ -2688,12 +2708,13 @@ async function openFileById(fileId, fileName) {
 }
 
 async function downloadFileById(fileId, fileName) {
-  const persistentId = await getPersistentFileId(fileId);
-  const url = persistentId
-    ? `https://web.connect.trimble.com/projects/${projectId}/viewer/2D?id=${persistentId}&version=${fileId}&type=revisions&etag=${fileId}`
-    : `https://web.connect.trimble.com/projects/${projectId}/viewer/2D?id=${fileId}&version=${fileId}&type=revisions&etag=${fileId}`;
-  console.log('[S+L Explorer] Öffne Trimble Viewer für Download:', fileName);
-  window.open(url, '_blank');
+  try {
+    const blob = await fetchFileBlobViaProxy(fileId, accessToken);
+    triggerBlobDownload(blob, fileName || 'download');
+  } catch (err) {
+    console.error('[S+L Explorer] Download-Fehler:', err);
+    alert('Download fehlgeschlagen: ' + err.message);
+  }
 }
 
 // ─────────────────────────────────────────
@@ -3200,7 +3221,7 @@ async function openFolderInTrimble(folderId, pathArr) {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v85 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v86 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
