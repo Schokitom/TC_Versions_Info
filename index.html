@@ -1350,15 +1350,15 @@
 <!-- Global Column Filter Dropdown -->
 <div id="colFilterDropdown" style="display:none" class="col-filter-dropdown">
   <div class="col-filter-search">
-    <input type="text" id="colFilterSearch" placeholder="Suchen…" oninput="renderColFilterItems()" />
+    <input type="text" id="colFilterSearch" placeholder="Suchen…" oninput="renderColFilterItems()" onclick="event.stopPropagation()" />
   </div>
   <div class="col-filter-actions">
-    <button onclick="colFilterSelectAll()">Alle</button>
-    <button onclick="colFilterClearAll()">Keine</button>
+    <button onclick="event.stopPropagation();colFilterSelectAll()">Alle</button>
+    <button onclick="event.stopPropagation();colFilterClearAll()">Keine</button>
   </div>
   <div class="col-filter-list" id="colFilterList"></div>
   <div class="col-filter-apply-row">
-    <button class="col-filter-apply-btn" onclick="colFilterApply()">
+    <button class="col-filter-apply-btn" onclick="event.stopPropagation();colFilterApply()">
       <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
       Anwenden
     </button>
@@ -3093,7 +3093,8 @@ function renderColFilterItems() {
     const div = document.createElement('div');
     div.className = 'col-filter-item' + (isChk ? ' checked' : '');
     div.innerHTML = `<div class="cf-check">${isChk ? check : ''}</div><span class="cf-label" title="${escHtml(val)}">${escHtml(val)}</span>`;
-    div.onclick = () => {
+    div.onclick = (e) => {
+      e.stopPropagation();
       if (active.has(val)) active.delete(val); else active.add(val);
       renderColFilterItems();
     };
@@ -3290,7 +3291,7 @@ async function openFolderInTrimble(folderId, pathArr) {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v87 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v88 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
