@@ -579,6 +579,27 @@
       transition: all .15s;
     }
     .col-filter-actions button:hover { border-color: var(--accent); color: var(--accent); }
+    .col-filter-apply-row {
+      padding: 7px 9px;
+      border-top: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .col-filter-apply-btn {
+      width: 100%;
+      display: flex; align-items: center; justify-content: center; gap: 6px;
+      background: var(--accent2);
+      border: 1px solid var(--accent);
+      border-radius: 6px;
+      padding: 6px 0;
+      font-size: 12px;
+      font-weight: 600;
+      font-family: var(--font-ui);
+      color: #fff;
+      cursor: pointer;
+      transition: background .15s;
+    }
+    .col-filter-apply-btn:hover { background: var(--accent); }
+    .col-filter-apply-btn svg { flex-shrink: 0; }
     .col-filter-list {
       overflow-y: auto; flex: 1; padding: 3px 0;
     }
@@ -1280,14 +1301,15 @@
         <th id="th-versions" style="text-align:center">
           <span onclick="sortTable('versions')" style="cursor:pointer">Versionen <span class="sort-icon">↕</span></span><button class="col-filter-btn" id="cfbtn-versions" onclick="event.stopPropagation();toggleColFilter('versions',this)" title="Versionen filtern"><svg viewBox="0 0 10 10" width="9" height="9" fill="currentColor"><path d="M0.5 1.5h9L6 5v3.5L4 7.5V5L0.5 1.5z"/><path d="M5 8.5l1.5-1.5 1.5 1.5" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
         </th>
-        <th onclick="sortTable('revision')" id="th-revision" style="text-align:center">
+        <th id="th-revision" style="text-align:center">
           <div class="rev-info-wrap">
-            Rev <span class="sort-icon">↕</span>
+            <span onclick="sortTable('revision')" style="cursor:pointer">Rev <span class="sort-icon">↕</span></span>
             <button class="rev-info-btn"
                     onclick="event.stopPropagation()"
                     onmouseenter="showRevTooltip(this)"
                     onmouseleave="hideRevTooltip()"
                     tabindex="0">i</button>
+            <button class="col-filter-btn" id="cfbtn-revision" onclick="event.stopPropagation();toggleColFilter('revision',this)" title="Revision filtern"><svg viewBox="0 0 10 10" width="9" height="9" fill="currentColor"><path d="M0.5 1.5h9L6 5v3.5L4 7.5V5L0.5 1.5z"/><path d="M5 8.5l1.5-1.5 1.5 1.5" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
           </div>
         </th>
         <th id="th-path">
@@ -1335,6 +1357,12 @@
     <button onclick="colFilterClearAll()">Keine</button>
   </div>
   <div class="col-filter-list" id="colFilterList"></div>
+  <div class="col-filter-apply-row">
+    <button class="col-filter-apply-btn" onclick="colFilterApply()">
+      <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+      Anwenden
+    </button>
+  </div>
 </div>
 
 <!-- Global Revision Info Tooltip -->
@@ -2944,6 +2972,14 @@ function formatDate(iso) {
   } catch { return iso; }
 }
 
+function formatDateOnly(iso) {
+  if (!iso) return '–';
+  try {
+    const d = new Date(iso);
+    return d.toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit', year:'numeric' });
+  } catch { return iso; }
+}
+
 function showRevTooltip(btn) {
   const el   = document.getElementById('revTooltipEl');
   if (!el) return;
@@ -2969,35 +3005,68 @@ function hideRevTooltip() {
 let colFilters = {};       // { colKey: Set of active values } — leer = alle anzeigen
 let _cfActiveCol = null;   // aktiv geöffnete Spalte
 let _cfAllValues = [];     // alle eindeutigen Werte der aktiven Spalte
+let _cfPending = null;     // Set der gerade im Dropdown gewählten Werte (vor "Anwenden")
 
 function getColValue(f, col) {
   switch (col) {
     case 'name':       return f.name || '–';
     case 'modifiedBy': return getModifiedBy(f);
-    case 'modifiedAt': return formatDate(getModifiedAt(f));
+    case 'modifiedAt': return formatDateOnly(getModifiedAt(f));
     case 'versions':   return String(f._versionCount || 1);
+    case 'revision': {
+      const vid = getRevisionId(f);
+      const p = vid ? psetCache[vid] : null;
+      if (p === undefined) return '/'; // noch nicht geladen → wie leer behandeln
+      if (p === null || !p.revision || p.revision === '') return '/';
+      return p.revision;
+    }
     case 'path':       return f._path || '/';
     default: return '';
   }
 }
 
+// Sortiert Filterwerte sinnvoll je nach Spaltentyp (numerisch / chronologisch / alphabetisch)
+function sortColValues(vals, col) {
+  if (col === 'versions') {
+    return vals.sort((a, b) => Number(a) - Number(b));
+  }
+  if (col === 'modifiedAt') {
+    // Werte sind "TT.MM.JJJJ" — in echtes Datum umwandeln zum Sortieren
+    return vals.sort((a, b) => {
+      const pa = a.split('.'), pb = b.split('.');
+      if (pa.length !== 3 || pb.length !== 3) return a.localeCompare(b, 'de');
+      const da = new Date(+pa[2], +pa[1]-1, +pa[0]);
+      const db = new Date(+pb[2], +pb[1]-1, +pb[0]);
+      return da - db;
+    });
+  }
+  if (col === 'revision') {
+    // "/" (leer) immer zuerst, dann alphabetisch
+    return vals.sort((a, b) => {
+      if (a === '/' && b !== '/') return -1;
+      if (b === '/' && a !== '/') return 1;
+      return a.localeCompare(b, 'de');
+    });
+  }
+  // Standard: alphabetisch (Name, Pfad, Geändert von)
+  return vals.sort((a, b) => a.localeCompare(b, 'de'));
+}
+
 function toggleColFilter(col, btn) {
   const dd = document.getElementById('colFilterDropdown');
-  // Schließen wenn selbe Spalte nochmal geklickt
   if (_cfActiveCol === col && dd.style.display !== 'none') {
     closeColFilter(); return;
   }
   _cfActiveCol = col;
 
-  // Alle eindeutigen Werte aus baseFiles sammeln
   const pool = baseFiles.length > 0 ? baseFiles : allFiles;
-  const vals = [...new Set(pool.map(f => getColValue(f, col)))].sort((a,b) => a.localeCompare(b, 'de'));
+  const vals = sortColValues([...new Set(pool.map(f => getColValue(f, col)))], col);
   _cfAllValues = vals;
 
-  // Wenn kein Filter aktiv → alle vorauswählen
-  if (!colFilters[col]) colFilters[col] = new Set(vals);
+  // Pending-Kopie: Änderungen wirken erst nach "Anwenden"
+  const existing = colFilters[col];
+  _cfPending = existing ? new Set(existing) : new Set(vals);
 
-  // Dropdown positionieren
   const rect = btn.getBoundingClientRect();
   dd.style.display = 'flex';
   const ddW = 240;
@@ -3014,7 +3083,7 @@ function toggleColFilter(col, btn) {
 function renderColFilterItems() {
   const list    = document.getElementById('colFilterList');
   const search  = (document.getElementById('colFilterSearch')?.value || '').toLowerCase();
-  const active  = colFilters[_cfActiveCol] || new Set(_cfAllValues);
+  const active  = _cfPending;
   const check   = `<svg viewBox="0 0 12 12"><path d="M2 6l3 3 5-5" stroke="#000" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
   list.innerHTML = '';
@@ -3026,27 +3095,27 @@ function renderColFilterItems() {
     div.innerHTML = `<div class="cf-check">${isChk ? check : ''}</div><span class="cf-label" title="${escHtml(val)}">${escHtml(val)}</span>`;
     div.onclick = () => {
       if (active.has(val)) active.delete(val); else active.add(val);
-      colFilters[_cfActiveCol] = active;
       renderColFilterItems();
-      updateColFilterBtn(_cfActiveCol);
-      renderTable();
     };
     list.appendChild(div);
   }
 }
 
 function colFilterSelectAll() {
-  colFilters[_cfActiveCol] = new Set(_cfAllValues);
+  _cfPending = new Set(_cfAllValues);
   renderColFilterItems();
-  updateColFilterBtn(_cfActiveCol);
-  renderTable();
 }
 
 function colFilterClearAll() {
-  colFilters[_cfActiveCol] = new Set();
+  _cfPending = new Set();
   renderColFilterItems();
+}
+
+function colFilterApply() {
+  colFilters[_cfActiveCol] = new Set(_cfPending);
   updateColFilterBtn(_cfActiveCol);
   renderTable();
+  closeColFilter();
 }
 
 function updateColFilterBtn(col) {
@@ -3055,7 +3124,6 @@ function updateColFilterBtn(col) {
   const pool = baseFiles.length > 0 ? baseFiles : allFiles;
   const allVals = new Set(pool.map(f => getColValue(f, col)));
   const active  = colFilters[col];
-  // Aktiv (eingeschränkt) wenn nicht alle Werte ausgewählt
   const isFiltered = active && active.size < allVals.size;
   btn.classList.toggle('active', !!isFiltered);
 }
@@ -3063,9 +3131,10 @@ function updateColFilterBtn(col) {
 function closeColFilter() {
   document.getElementById('colFilterDropdown').style.display = 'none';
   _cfActiveCol = null;
+  _cfPending = null;
 }
 
-// Klick außerhalb schließt Dropdown
+// Klick außerhalb schließt Dropdown (verwirft ungespeicherte Änderungen)
 document.addEventListener('click', e => {
   const dd = document.getElementById('colFilterDropdown');
   if (!dd || dd.style.display === 'none') return;
@@ -3221,7 +3290,7 @@ async function openFolderInTrimble(folderId, pathArr) {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v86 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v87 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
