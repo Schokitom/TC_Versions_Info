@@ -1719,24 +1719,23 @@ async function downloadFile(idx, explicitVersionId) {
   if (!versionId) { alert('Keine Datei-ID für Download verfügbar.'); return; }
 
   try {
-    // Schritt 1: Signierte Download-URL holen via /files/{id}/downloadurl
+    // Signierte Download-URL holen via /files/{id}/downloadurl
     const data = await tcGet(`/files/${versionId}/downloadurl`);
+    console.log('[S+L Explorer] downloadurl Response:', JSON.stringify(data).slice(0, 300));
     const dlUrl = data?.url || data?.downloadUrl || data?.link
       || (typeof data === 'string' ? data : null);
-    if (!dlUrl) throw new Error('Keine Download-URL erhalten');
+    if (!dlUrl) throw new Error('Keine Download-URL erhalten. Response: ' + JSON.stringify(data).slice(0,150));
 
-    // Schritt 2: Datei als Blob laden und direkt herunterladen
-    const resp = await fetch(dlUrl);
-    if (!resp.ok) throw new Error(`Download HTTP ${resp.status}`);
-    const blob = await resp.blob();
-    const blobUrl = URL.createObjectURL(blob);
+    // Direkt öffnen statt per fetch laden — DataOcean-URLs blockieren oft CORS für fetch,
+    // aber normale Navigation (window.open / <a>) funktioniert.
     const a = document.createElement('a');
-    a.href = blobUrl;
+    a.href = dlUrl;
     a.download = f.name || 'download';
-    a.style.display = 'none';
+    a.target = '_blank';
+    a.rel = 'noopener';
     document.body.appendChild(a);
     a.click();
-    setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(blobUrl); }, 1000);
+    document.body.removeChild(a);
   } catch (err) {
     console.error('[S+L Explorer] Download-Fehler:', err);
     alert('Download fehlgeschlagen: ' + err.message);
@@ -2703,15 +2702,10 @@ async function downloadFileById(fileId, fileName) {
     const data = await tcGet(`/files/${fileId}/downloadurl`);
     const dlUrl = data?.url || data?.downloadUrl || data?.link
       || (typeof data === 'string' ? data : null);
-    if (!dlUrl) throw new Error('Keine Download-URL erhalten');
-    const resp = await fetch(dlUrl);
-    if (!resp.ok) throw new Error(`Download HTTP ${resp.status}`);
-    const blob = await resp.blob();
-    const blobUrl = URL.createObjectURL(blob);
+    if (!dlUrl) throw new Error('Keine Download-URL erhalten. Response: ' + JSON.stringify(data).slice(0,150));
     const a = document.createElement('a');
-    a.href = blobUrl; a.download = fileName || 'download'; a.style.display = 'none';
-    document.body.appendChild(a); a.click();
-    setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(blobUrl); }, 1000);
+    a.href = dlUrl; a.download = fileName || 'download'; a.target = '_blank'; a.rel = 'noopener';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
   } catch (err) {
     console.error('[S+L Explorer] Download-Fehler:', err);
     alert('Download fehlgeschlagen: ' + err.message);
@@ -3222,7 +3216,7 @@ async function openFolderInTrimble(folderId, pathArr) {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v83 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v84 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
