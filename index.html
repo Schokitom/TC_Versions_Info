@@ -2879,13 +2879,20 @@ async function openVersionModal(idx, fileName) {
         ? `${v.createdBy.firstName} ${v.createdBy.lastName || ''}`.trim()
         : v.createdBy?.email || v.modifiedBy?.email || '–';
       const size       = v.size ? formatSize(v.size) : '–';
+      // V1 zeigt unzuverlässig immer die aktuellste Revision (Trimble-Eigenheit) —
+      // sobald es eine V2+ gibt, wird bei V1 daher bewusst "/" angezeigt.
+      // versions ist neueste-zuerst sortiert → die älteste Version (V1) ist das letzte Element.
+      const isV1 = (i === versions.length - 1);
+      const revCellHtml = (isV1 && versions.length > 1)
+        ? `<span class="rev-badge empty" title="Revision für V1 nicht zuverlässig ermittelbar">/</span>`
+        : revBadgeHtml(vId);
       return `
         <tr>
           <td><span class="ver-num">v${versionNum}</span></td>
           <td class="date-cell">${createdAt}</td>
           <td class="user-cell" style="font-size:12px">${escHtml(createdBy)}</td>
           <td style="font-family:var(--font);font-size:11px;color:var(--muted)">${size}</td>
-          <td class="revision-cell">${revBadgeHtml(vId)}</td>
+          <td class="revision-cell">${revCellHtml}</td>
           <td style="text-align:center;white-space:nowrap;display:flex;gap:4px;justify-content:center">
             <button class="ver-open-btn" onclick="openFile(${idx},'${vId}')" title="Diese Version im Viewer öffnen">
               <svg viewBox="0 0 24 24"><path d="M19 19H5V5h7V3H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/></svg>
@@ -3291,7 +3298,7 @@ async function openFolderInTrimble(folderId, pathArr) {
       || projectInfo?.rootFolderId
       || projectInfo?.root?.id
       || null;
-    console.log('[S+L Explorer] v88 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
+    console.log('[S+L Explorer] v89 – projectId:', projectId, '| rootFolderId from WS-API:', rootFolderId);
 
     // Request access token
     setLoadingMsg('Anfrage für Zugriffstoken…');
